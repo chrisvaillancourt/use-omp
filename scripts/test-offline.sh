@@ -53,7 +53,7 @@ expect edge-session-transcript '.is_event_stream == false and .looks_complete ==
 expect edge-subagent-failure '.subagent_failures == 1 and .subagent_cost_usd == 0.005' \
   "aborted or failed subagents are counted and their cost included"
 check "fixtures and docs contain no local paths, emails, or account-linked IDs (they may be published)" \
-  '! grep -rEq -e "/Users/|-Users-|/home/|/root/|/var/folders/|claude-[0-9]+/|resp_[A-Za-z0-9]|[A-Za-z]:\\\\+Users|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}" "$fixtures" "$repo/docs" "$repo/README.md"'
+  '! grep -rEq -e "/Users/|-Users-|/home/|/root/|/var/folders/|claude-[0-9]+/|resp_[A-Za-z0-9]|[A-Za-z]:\\\\+Users|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}" "$fixtures" "$repo/docs" "$repo/README.md" "$repo/AGENTS.md"'
 check "edge-truncated: a truncated last line makes the filter fail" \
   '! jq -s -f "$skill/scripts/summarize-events.jq" "$fixtures/events/edge-truncated.jsonl" > /dev/null 2>&1'
 

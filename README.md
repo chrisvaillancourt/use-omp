@@ -12,6 +12,7 @@ The repository holds the skill's instructions, three small scripts the skill use
 
 ## Documentation
 
+- [AGENTS.md](AGENTS.md): instructions for agents working in this repository (also loaded by Claude Code through `CLAUDE.md`).
 - [SKILL.md](skills/use-omp/SKILL.md): the procedure agents follow.
 - [docs/decisions.md](docs/decisions.md): what was decided and why, with the evidence and when to revisit each decision.
 - [docs/2026-10-13-audit.md](docs/2026-10-13-audit.md): the usage audit, verified omp behavior, experiments, and follow-ups behind the current design.
