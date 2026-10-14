@@ -1,6 +1,6 @@
 # Design decisions
 
-Each entry records what was decided, why, the evidence, and when to revisit it. Evidence and experiments are described in [the 2026-10-13 audit](2026-10-13-audit.md). Behavior claims were verified against omp 18.10.3 unless noted.
+Each entry records what was decided, why, the evidence, and when to revisit it. Evidence and experiments are described in [the 2026-10-13 audit](2026-10-13-audit.md). Behavior claims were verified against omp 18.10.3 unless noted, and rechecked against the 18.10.4 source diff and live tier.
 
 ## 1. JSON event mode is the default launch
 
@@ -71,7 +71,7 @@ Each entry records what was decided, why, the evidence, and when to revisit it. 
 
 **Why not change the global settings:** in the TUI, background jobs let the primary agent keep working while subagents and long commands run, and the TUI waits for them. The loss happens only in print mode.
 
-**Revisit if:** omp's print mode starts waiting for background work (the TUI's settle loop in `event-controller.ts` has no print-mode counterpart in 18.10.3), or either setting ID is renamed. The offline tests check that both IDs still exist.
+**Revisit if:** omp's print mode starts waiting for background work (the TUI's settle loop in `event-controller.ts` has no print-mode counterpart in 18.10.3 or 18.10.4), or either setting ID is renamed. The offline tests check that both IDs still exist.
 
 ## 7. Preserve the user's omp configuration otherwise
 

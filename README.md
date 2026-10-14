@@ -96,7 +96,7 @@ Normal-capability omp calls can modify files and use configured services. A pare
 
 Reviews keep full capabilities so the reviewer can run tests and reproduce issues. The skill protects the user's files by isolating the review (a worktree or clone, scratch files in a temporary directory, `git status` before and after) rather than by restricting tools. `--read-only` (`--approval-mode always-ask`) is opt-in. It blocks bash, eval, edits, MCP tools, and subagents, so a review becomes unverified static analysis. See decision 5 in [docs/decisions.md](docs/decisions.md). Decision 6 explains why the wrapper turns omp's background jobs off for headless runs.
 
-CLI guidance was checked against installed omp **18.10.3** (source and live runs). The historical schema diagnosis is explicitly scoped to **18.4.9**. Upstream help and the installed version take precedence over cached examples. A successful model response does not verify every optional tool or establish parity with the interactive UI.
+CLI guidance was checked against installed omp **18.10.4** (source and live runs). The historical schema diagnosis is explicitly scoped to **18.4.9**. Upstream help and the installed version take precedence over cached examples. A successful model response does not verify every optional tool or establish parity with the interactive UI.
 
 ## Verification
 
@@ -137,6 +137,8 @@ A cheap tool-capable model is enough. With `openai-codex/gpt-6-luna:low` the pri
 The offline checks were mutation-tested: nine deliberate bugs in the scripts each made at least one check fail. A failing live check means the skill's description of omp has drifted; see [maintenance.md](docs/maintenance.md).
 
 On 2026-10-13 with omp 18.10.3, both tiers passed with `openai-codex/gpt-6-luna:low` and `openai-codex/gpt-6.1-sol:low`. The exit-status, stdin, session-directory, approval, and event-field claims were also checked against the installed source.
+
+On 2026-10-14 with omp 18.10.4, the free tier passed and every live check passed in at least one of two runs with `openai-codex/gpt-6-luna:low`. Each run had one SKIP, a different probe each time, because the model refused the task as instructions inside an attached file (see [troubleshooting.md](skills/use-omp/references/troubleshooting.md#a-refusal-that-looks-complete)). The 18.10.3 to 18.10.4 source diff leaves print mode, exit status, events, session flags, approval tiers, and the headless approval refusal unchanged.
 
 Earlier live checks on 2026-10-06 with omp 18.6.3 exercised a real file read through the default tool setup, JSON event extraction with the documented jq filters, and exact-session recall. The dedicated-session recipe also accepted a dash-prefixed task and an `@`-prefixed literal follow-up without interpreting them as CLI syntax. Both pnpm and npm runners discovered the skill through `skills add . --list`.
 

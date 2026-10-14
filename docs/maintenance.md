@@ -57,7 +57,7 @@ The ledger answers most questions directly. For runs launched without the wrappe
 
 ## Known limits
 
-- `looks_complete` is a heuristic. It cannot tell whether the answer is right; check the evidence.
+- `looks_complete` is a heuristic. It cannot tell whether the answer is right, or whether the child declined the task; check the evidence.
 - `write_targets` misses files changed through `bash`. `git status` is the authority.
 - With `--allow-async` or a direct launch without the overlay, background subagents and long bash commands can be cancelled at exit, and background subagent spend is not in the summary.
 - The overlay depends on the setting IDs `async.enabled` and `bash.autoBackground.enabled`. The offline tests fail if omp renames either, and the live tier's subagent and 65-second bash probes check that both still take effect.

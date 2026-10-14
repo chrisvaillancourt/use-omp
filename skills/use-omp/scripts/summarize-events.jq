@@ -1,4 +1,4 @@
-# Summarize an omp `--mode json` event file (verified against omp 18.10.3).
+# Summarize an omp `--mode json` event file (verified against omp 18.10.4).
 # Usage: jq -s -f summarize-events.jq events.jsonl
 # A truncated final line makes jq fail; a stream cut at a line boundary shows agent_end_seen: false.
 # primary_cost_usd covers the primary agent. subagent_cost_usd adds direct subagents that returned inline

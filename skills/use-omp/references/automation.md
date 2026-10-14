@@ -60,7 +60,7 @@ Capture stdout and stderr separately and retain the process exit code. Store tra
 
 ## Read the event stream
 
-The first line is a `session` header (`version`, `id`, `cwd`, `timestamp`). Events that matter to a caller (omp 18.10.3):
+The first line is a `session` header (`version`, `id`, `cwd`, `timestamp`). Events that matter to a caller (omp 18.10.4):
 
 - `message_update`: incremental deltas only, with no message snapshot. Not an authoritative message.
 - `message_end`: complete message. For `message.role == "assistant"`, it carries `content[]` (`text`, `thinking`, and `toolCall` blocks), `provider`, `model`, `stopReason`, optional `errorMessage`, and `usage` (`input`, `output`, `cacheRead`, `cacheWrite`, `totalTokens`, `cost.total`).
@@ -98,7 +98,7 @@ jq -r 'select(.type == "message_end" and .message.role == "assistant") | .messag
 
 ## Exit status and completion
 
-In both text and JSON print modes (18.10.3), exit 1 means the last assistant message ended with `stopReason` `error` or `aborted`, a strict MCP startup failure, a session-store durability failure, or a launch failure before the model is called (for example `Error: File not found` for a missing `@file`). Usage errors exit 2. Signals exit 130, 143, or 129. Everything else exits 0, including:
+In both text and JSON print modes (18.10.4), exit 1 means the last assistant message ended with `stopReason` `error` or `aborted`, a strict MCP startup failure, a session-store durability failure, or a launch failure before the model is called (for example `Error: File not found` for a missing `@file`). Usage errors exit 2. Signals exit 130, 143, or 129. Everything else exits 0, including:
 
 - A `--max-time` deadline that expires between turns or before the first answer. A 1-second deadline exited 0 with no assistant message. A deadline that interrupts a model turn records `aborted` and exits 1.
 - `stopReason` `length`.
