@@ -30,7 +30,7 @@ skills/use-omp/            the installed skill (SKILL.md, references/, scripts/)
   scripts/report.sh        metrics from the run ledger
 scripts/test-offline.sh    free test tier: no model calls, about 10 s
 scripts/verify-skill.sh    live tier: free tier plus six short model calls
-tests/fixtures/            event and ledger fixtures for the free tier
+tests/fixtures/            event, ledger, and answer fixtures, and the declined-task pattern
 docs/                      decisions, audit, maintenance
 ```
 
@@ -48,6 +48,6 @@ docs/                      decisions, audit, maintenance
 ## Before you finish
 
 1. Run `scripts/test-offline.sh`. All checks must pass.
-2. After an omp upgrade, or a change to omp-facing behavior, run `scripts/verify-skill.sh openai-codex/gpt-6-luna:low` (or another cheap tool-capable model). Rerun a SKIP.
+2. After an omp upgrade, or a change to omp-facing behavior, run `scripts/verify-skill.sh openai-codex/gpt-6-luna:low` (or another cheap tool-capable model). Rerun a SKIP with `--probe NAME`.
 3. Update the docs that describe what you changed (see the table above).
 4. Commit with Conventional Commits (`feat(skill):`, `fix(skill):`, `docs:`, `test:`). Explain why in the body, and leave out tool attribution.

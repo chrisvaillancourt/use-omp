@@ -97,7 +97,9 @@ fi
 
 started=$(date -u +%Y-%m-%dT%H:%M:%SZ); start_s=$(date +%s)
 umask "$caller_umask"
-(cd "$workspace" && exec omp "${args[@]}" "@$run_dir/prompt.md") \
+# omp sends the file as a <file> block. Alone, it reads as file content, and a model can decline its
+# instructions as untrusted; the typed line after it makes the file the user's request.
+(cd "$workspace" && exec omp "${args[@]}" "@$run_dir/prompt.md" -- "The attached file is my task for you. Carry it out.") \
   < /dev/null >> "$run_dir/events.jsonl" 2>> "$run_dir/stderr.txt" &
 omp_pid=$!
 # If the host stops this script, stop omp and still write the record.

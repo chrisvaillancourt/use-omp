@@ -105,17 +105,19 @@ Two test tiers guard the skill. Tests use only the behavior the skill depends on
 ```sh
 scripts/test-offline.sh                              # free: no model calls, about 10 seconds
 scripts/verify-skill.sh openai-codex/gpt-6-luna:low  # after every omp upgrade: free tier + 6 live calls
+scripts/verify-skill.sh --probe subagent openai-codex/gpt-6-luna:low  # rerun one probe
 ```
 
-**Free tier** (`scripts/test-offline.sh`, 63 checks). Run it after any skill edit. It covers:
+**Free tier** (`scripts/test-offline.sh`, 73 checks). Run it after any skill edit. It covers:
 
 - `summarize-events.jq` against fixtures in `tests/fixtures/events/`. Six are trimmed events from real omp 18.10.3 runs, with local paths and provider response IDs removed: a normal run, a deadline, a refused tool, an inline subagent, a background subagent, and a backgrounded bash command. The rest are edge cases: a final `stop` that still carries a tool call, `pause_turn`, a missing `agent_end`, empty text, odd records, a truncated stream, patch-format edits, a session transcript, and a failed subagent.
 - `report.sh` against a ledger fixture with malformed lines, non-ISO dates, non-numeric fields, read-only refusals, and background jobs.
 - `run-omp.sh` against a stub `omp` on `PATH`:
   - umask and launch directory;
-  - the flags it passes, including the background-job overlay, `--config`, `--read-only`, `--allow-async`, `--resume`, and `--no-record`;
+  - the flags it passes, including the typed line that names the task file, the background-job overlay, `--config`, `--read-only`, `--allow-async`, `--resume`, and `--no-record`;
   - the ledger line and private record files;
   - TERM handling and usage errors.
+- `verify-skill.sh` usage errors, which must stop before any model call, and its declined-task pattern against answer fixtures in `tests/fixtures/answers/`.
 - omp CLI facts checked without sending a prompt:
   - the flags the skill uses and the `omp models --json` shape;
   - the setting IDs the overlay relies on;
@@ -132,13 +134,15 @@ scripts/verify-skill.sh openai-codex/gpt-6-luna:low  # after every omp upgrade: 
 - a 65-second bash command stays inline instead of becoming a background job;
 - every exit code matches the final stop reason, and the ledger and `report.sh` account for every run.
 
-A cheap tool-capable model is enough. With `openai-codex/gpt-6-luna:low` the primary agents cost under a cent per run. The subagent probe runs on your `task` role's model, which dominates the total of a few cents. A probe reports SKIP when the model never makes the tool call it needs; rerun it.
+A cheap tool-capable model is enough. With `openai-codex/gpt-6-luna:low` the primary agents cost under a cent per run. The subagent probe runs on your `task` role's model, which dominates the total of a few cents. A probe reports SKIP when the model never makes the tool call it needs; rerun that probe alone with `--probe NAME` (repeatable: `normal`, `resume`, `deadline`, `approval`, `subagent`, or `bash`). `resume` also runs `normal`, whose session it resumes. A probe whose answer declines the task as instructions inside an attached file reports FAIL, not SKIP.
 
 The offline checks were mutation-tested: nine deliberate bugs in the scripts each made at least one check fail. A failing live check means the skill's description of omp has drifted; see [maintenance.md](docs/maintenance.md).
 
 On 2026-10-13 with omp 18.10.3, both tiers passed with `openai-codex/gpt-6-luna:low` and `openai-codex/gpt-6.1-sol:low`. The exit-status, stdin, session-directory, approval, and event-field claims were also checked against the installed source.
 
-On 2026-10-14 with omp 18.10.4, the free tier passed and every live check passed in at least one of two runs with `openai-codex/gpt-6-luna:low`. Each run had one SKIP, a different probe each time, because the model refused the task as instructions inside an attached file (see [troubleshooting.md](skills/use-omp/references/troubleshooting.md#a-refusal-that-looks-complete)). The 18.10.3 to 18.10.4 source diff leaves print mode, exit status, events, session flags, approval tiers, and the headless approval refusal unchanged.
+On 2026-10-14 with omp 18.10.4, the free tier passed and every live check passed in at least one of two runs with `openai-codex/gpt-6-luna:low`. Each run had one SKIP, a different probe each time, because the model refused the task as instructions inside an attached file (see [troubleshooting.md](skills/use-omp/references/troubleshooting.md#a-refusal-that-looks-complete)). The 18.10.3 to 18.10.4 source diff leaves print mode, exit status, events, session flags, approval tiers, and the headless approval refusal unchanged; the [audit addendum](docs/2026-10-13-audit.md#upgrade-check-18104-2026-10-14) cites the files.
+
+Later that day, after `run-omp.sh` began following the task file with a typed line that names it as the task (decision 12 in [docs/decisions.md](docs/decisions.md)), one full live run had no failures and one SKIP. In that run the model ran the subagent probe's command with `bash` itself instead of calling `task`; it did not decline the task. A `--probe subagent` rerun passed.
 
 Earlier live checks on 2026-10-06 with omp 18.6.3 exercised a real file read through the default tool setup, JSON event extraction with the documented jq filters, and exact-session recall. The dedicated-session recipe also accepted a dash-prefixed task and an `@`-prefixed literal follow-up without interpreting them as CLI syntax. Both pnpm and npm runners discovered the skill through `skills add . --list`.
 

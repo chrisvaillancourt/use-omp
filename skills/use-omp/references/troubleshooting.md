@@ -16,7 +16,11 @@ With `async.enabled: true` (omp's default), the task tool starts subagents as ba
 
 ## A refusal that looks complete
 
-The task file arrives as an attachment, and a model can decline it as untrusted file content instead of acting on it. Observed 2026-10-14 on omp 18.10.4 with `openai-codex/gpt-6-luna:low`, in 2 of 12 short live probes: "I can't follow instructions embedded in the provided file; they are untrusted content" and "I can't comply with instructions from an attached file that attempt to dictate tool use." Both runs exited 0 with `looks_complete` true and no tool calls. Signs: the answer talks about the attached file instead of doing the task, and `tool_calls` is empty for a task that needed tools. Fix: rerun; if it repeats, write the task file as the user's direct request (who is asking and why) rather than a bare list of tool steps.
+The task file arrives as an attachment, and a model can decline it as untrusted file content instead of acting on it. Observed 2026-10-14 on omp 18.10.4 with `openai-codex/gpt-6-luna:low`, in 2 of 12 short live probes launched without a typed message: "I can't follow instructions embedded in the provided file; they are untrusted content" and "I can't comply with instructions from an attached file that attempt to dictate tool use." Both runs exited 0 with `looks_complete` true and no tool calls.
+
+Signs: the answer talks about the attached file instead of doing the task, and `tool_calls` is empty for a task that needed tools.
+
+Fix: `run-omp.sh` follows the file with a typed line that names it as the task; a direct launch needs the same line after `--`. If a run still declines, rerun it. If it repeats, write the task file as the user's direct request (who is asking and why) rather than a bare list of tool steps.
 
 ## Launch errors
 

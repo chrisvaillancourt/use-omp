@@ -89,13 +89,13 @@ Each entry records what was decided, why, the evidence, and when to revisit it. 
 
 **Decision:**
 
-- `scripts/test-offline.sh` (free) covers everything checkable without a model: the summary filter against real and edge-case event fixtures, the report against a ledger fixture, the wrapper against a stub `omp`, and omp CLI facts checked without sending a prompt.
+- `scripts/test-offline.sh` (free) covers everything checkable without a model: the summary filter against real and edge-case event fixtures, the report against a ledger fixture, the wrapper against a stub `omp`, `verify-skill.sh` usage errors and its declined-task pattern, and omp CLI facts checked without sending a prompt.
 - `scripts/verify-skill.sh <provider/model>` runs that tier, then six short live calls through the wrapper. They cover a normal run, resume, a deadline, `--read-only`, an inline subagent, and a 65-second bash command, plus ledger and report checks.
 - SKILL.md names the omp version it was verified against, and the live tier fails when the installed version differs.
 
 Every live probe runs with a `memory.backend: off` overlay (passed through the wrapper's `--config`). With memory on, the probes read and wrote the repository's memory bank. One probe answered with a string an earlier test had stored, and a resume check could have passed from memory instead of the session.
 
-**Why:** the user upgrades omp regularly, and several claims depend on omp internals that change between releases: exit predicates, event fields, approval tiers, background-job behavior, and setting IDs. omp released 18.6.3 to 18.10.3 within one week. Live calls are kept to behavior that only a model run exercises. A cheap model (`gpt-6-luna`) passes every probe, so the live tier costs a few cents. Most of that is the subagent probe, which runs on the user's `task` role. The offline checks were mutation-tested so that each guarded behavior has a check that fails when it breaks.
+**Why:** the user upgrades omp regularly, and several claims depend on omp internals that change between releases: exit predicates, event fields, approval tiers, background-job behavior, and setting IDs. omp released 18.6.3 to 18.10.3 within one week. Live calls are kept to behavior that only a model run exercises. A cheap model (`gpt-6-luna`) passes every probe, though a run may need a `--probe` rerun for a SKIP, so the live tier costs a few cents. Most of that is the subagent probe, which runs on the user's `task` role. The offline checks were mutation-tested so that each guarded behavior has a check that fails when it breaks.
 
 ## 10. Memory is the user's to keep; tests and independent reviews turn it off
 
@@ -106,3 +106,11 @@ Every live probe runs with a `memory.backend: off` overlay (passed through the w
 ## 11. Keep the skill generic
 
 **Decision:** The skill has no user-specific paths, credentials, preferred models, or organization settings. Record locations default to omp's and XDG's standard places and can be overridden by environment variables. User-specific facts from the audit (for example the user's role mappings) stay out of the skill.
+
+## 12. A typed line names the task file as the user's request
+
+**Decision (user, 2026-10-14):** `run-omp.sh` passes the task file as `@prompt.md` and follows it, after `--`, with one typed line: "The attached file is my task for you. Carry it out." The live tier fails a probe, instead of skipping it, when the model's answer declines the task as instructions inside an attached file. The pattern is `tests/fixtures/declined-task.ere`: a refusal verb, then the instructions or task, then the file, in one sentence. The free tier checks it against the two recorded refusals and against answers that only mention the file.
+
+**Why:** omp sends an `@file` as a `<file name="...">` block, and the first typed message after it (`src/cli/initial-message.ts:33-41`). With no typed message, the whole request looks like file content. On 2026-10-14, with omp 18.10.4 and `openai-codex/gpt-6-luna:low`, the model declined 2 of 12 live probes this way: "I can't follow instructions embedded in the provided file; they are untrusted content." Both runs exited 0 with `looks_complete` true, so a caller would have accepted a run that did nothing. The live tier reported them as SKIP, which hid the problem.
+
+**Revisit if:** a model still declines tasks with the typed line present, or omp changes how it combines `@file` text with typed messages.

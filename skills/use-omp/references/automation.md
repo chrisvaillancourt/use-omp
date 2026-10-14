@@ -52,7 +52,7 @@ omp -p --cwd "$workspace" --model "$model" --session-dir "$session_dir" \
 echo "exit=$?" > "$run_dir/exit.txt"
 ```
 
-The `--` separator makes a leading `-` or `@` in task text literal rather than CLI syntax. For an intentional file attachment, use an absolute `"@$prompt_file"` before `--` instead. Close unused stdin as shown (or use the process runner's null-input option); an open inherited pipe blocks startup before the task deadline begins, and after one second omp prints a "waiting for EOF" notice to stderr.
+The `--` separator makes a leading `-` or `@` in task text literal rather than CLI syntax. For an intentional file attachment, use an absolute `"@$prompt_file"` before `--` instead, and follow it with a typed line that names the file as the task, as `run-omp.sh` does ("The attached file is my task for you. Carry it out."). Without that line, a model can decline the file as untrusted content. Close unused stdin as shown (or use the process runner's null-input option); an open inherited pipe blocks startup before the task deadline begins, and after one second omp prints a "waiting for EOF" notice to stderr.
 
 Keep the session directory until all follow-ups finish. Temporary directories can be cleaned by the OS; use a private durable directory for longer-lived work. Remove only task-owned temporary files when the conversation is no longer needed. Do not delete user-managed session stores.
 

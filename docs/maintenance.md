@@ -7,9 +7,10 @@
    ```sh
    scripts/test-offline.sh                              # free, about 10 seconds
    scripts/verify-skill.sh openai-codex/gpt-6-luna:low  # six live calls, a few cents
+   scripts/verify-skill.sh --probe bash openai-codex/gpt-6-luna:low  # one probe, to rerun a SKIP
    ```
 
-   The live tier records into a throwaway directory, not your ledger or `omp stats`. Every check prints PASS, FAIL, or SKIP. A SKIP means the model never made the tool call a probe needed; rerun it. Artifacts stay in the printed work directory.
+   The live tier records into a throwaway directory, not your ledger or `omp stats`. Every check prints PASS, FAIL, or SKIP. A SKIP means the model never made the tool call a probe needed; rerun that probe alone with `--probe NAME` (`resume` also runs `normal`). A FAIL that says the model declined the task as an attached file's instructions means the typed task line stopped working (see [decision 12](decisions.md#12-a-typed-line-names-the-task-file-as-the-users-request)). Artifacts stay in the printed work directory.
 2. A failed version check alone means omp changed. Read the installed changelog (`"$(dirname "$(realpath "$(command -v omp)")")/../CHANGELOG.md"`) for print mode, events, sessions, approval, task, and async. Re-verify the affected claims. Then update the version in SKILL.md ("last verified against omp **x.y.z**") and in the README.
 3. Any other FAIL means a documented behavior drifted. Fix the skill text, the scripts, or both, and record the change in [decisions.md](decisions.md) if it changes a decision.
 4. Reinstall the skill. Installed copies don't follow this checkout:
@@ -25,6 +26,7 @@
 - Add a test only for behavior the skill documents or the scripts implement. The README's Verification section lists what each tier covers.
 - Keep live probes isolated: they run with the `memory.backend: off` overlay and throwaway record directories, so they neither read the user's memory or ledger nor add to them.
 - Prefer the free tier. Use a fixture for event-parsing behavior, the stub `omp` for wrapper behavior, and a no-prompt CLI call for omp facts. Add a live call only when the behavior depends on what omp does during a model run.
+- The declined-task pattern lives in `tests/fixtures/declined-task.ere`, one extended regular expression per line. When a model declines a task in a new way, add its answer as `tests/fixtures/answers/declined-*.md`; add answers that must stay SKIP as `skip-*.md`.
 - Build event fixtures from a real run's `events.jsonl`. Drop `message_update`, `tool_execution_update`, and `tool_stream_update` records, strip signature or encrypted fields, and replace local paths with neutral ones such as `/work` and `/tmp`. Then confirm that the summary is unchanged.
 - To check that a new test can fail, break the code it guards in a copy of the working tree (`rsync -a --exclude .git ./ <scratch>/`) and confirm the test fails there.
 
@@ -45,7 +47,7 @@ omp stats --summary          # or `omp stats` for the dashboard; see the /agent-
 
 `report.sh` covers delegation outcomes: completion rate, nonzero exits, unexpected tool errors, subagent failures, duration, and primary plus inline-subagent cost. `omp stats` covers tokens, latency, error rate, and total cost, including background subagents and the advisor.
 
-Retention is manual. Delete old run directories when you no longer need them; `omp gc --archive` archives cold transcripts, which can leave older ledger `session_file` paths stale. Records hold prompts, source code, and tool output, so keep them private.
+Retention is manual. Delete old run directories when you no longer need them; `omp gc --archive` archives cold transcripts, which can leave older ledger `session_file` paths stale. `omp gc --compress` (omp 18.10.4 and later, APFS or NTFS) compresses idle transcripts in place and keeps those paths valid; on 18.10.4 it can exit 1 when a session holds a pretty-printed JSON artifact over 1 MiB ([can1357/oh-my-pi#15745](https://github.com/can1357/oh-my-pi/issues/15745)). Records hold prompts, source code, and tool output, so keep them private.
 
 ## Re-auditing usage
 

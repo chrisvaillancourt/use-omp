@@ -4,7 +4,8 @@
 #   1. summarize-events.jq against event fixtures (real omp 18.10.3 runs plus edge cases)
 #   2. report.sh against a ledger fixture
 #   3. run-omp.sh mechanics with a stub omp on PATH
-#   4. omp CLI facts the skill relies on, checked without sending a prompt (skipped if omp is absent)
+#   4. verify-skill.sh usage errors and its declined-task pattern, without model calls
+#   5. omp CLI facts the skill relies on, checked without sending a prompt (skipped if omp is absent)
 # Run after any skill edit; scripts/verify-skill.sh runs it before its live checks.
 set -uo pipefail
 
@@ -98,6 +99,9 @@ check "omp inherits the caller's umask ($caller_umask), not the records' 077" 'g
 check "omp starts in the workspace (so .env matches an interactive launch)" 'grep -qx "pwd=$repo" "$work/stub.log"'
 check "wrapper passes --cwd, --session-dir, --mode json, and an absolute @prompt" \
   'grep -qx "arg=--cwd" "$work/stub.log" && grep -qx "arg=--session-dir" "$work/stub.log" && grep -qx "arg=json" "$work/stub.log" && grep -q "^arg=@/.*/prompt.md$" "$work/stub.log"'
+check "wrapper follows the @prompt with the typed task line, after --" \
+  'grep -A2 "^arg=@/.*/prompt.md$" "$work/stub.log" | sed -n 2p | grep -qx "arg=--" \
+   && grep -A2 "^arg=@/.*/prompt.md$" "$work/stub.log" | sed -n 3p | grep -qxF "arg=The attached file is my task for you. Carry it out."'
 check "wrapper adds no approval flag without --read-only" '! grep -q "approval-mode" "$work/stub.log"'
 check "the overlay turns off async subagents and bash auto-backgrounding" \
   '[ "$(cat "$(overlay_file)")" = "$(printf "async:\n  enabled: false\nbash:\n  autoBackground:\n    enabled: false")" ]'
@@ -132,6 +136,33 @@ check "a TERM to the wrapper stops omp and still writes the ledger line" \
 check "usage errors exit 2" 'bash "$skill/scripts/run-omp.sh" --workspace > /dev/null 2>&1; [ $? = 2 ]'
 check "an empty prompt file is a usage error" \
   ': > "$work/empty.md"; stub_run --prompt-file "$work/empty.md" > /dev/null 2>&1; [ $? = 2 ]'
+
+echo "== verify-skill.sh (no model calls)"
+# A usage error must stop the live tier before it runs anything, so the stub omp records no call.
+# If a parsing bug let verify-skill.sh start, it would run this script again; the guard skips this section
+# in that nested run so it cannot recurse.
+if [ -n "${USE_OMP_OFFLINE_NESTED:-}" ]; then
+  echo "(skipped: started by verify-skill.sh, which this section launched)"
+else
+  verify_usage() {
+    : > "$work/stub.log"
+    USE_OMP_OFFLINE_NESTED=1 PATH="$stub:$PATH" STUB_LOG="$work/stub.log" USE_OMP_STATE_DIR="$work/verify-state" \
+      USE_OMP_SESSION_DIR="$work/verify-sessions" bash "$repo/scripts/verify-skill.sh" "$@" > /dev/null 2>&1
+  }
+  check "verify-skill.sh without a model is a usage error (exit 2)" 'verify_usage; [ $? = 2 ] && [ ! -s "$work/stub.log" ]'
+  check "verify-skill.sh rejects an unknown --probe (exit 2)" 'verify_usage --probe nope stub/stub; [ $? = 2 ] && [ ! -s "$work/stub.log" ]'
+  check "verify-skill.sh rejects a second model argument (exit 2)" 'verify_usage stub/stub other/model; [ $? = 2 ] && [ ! -s "$work/stub.log" ]'
+  check "verify-skill.sh rejects several probe names in one --probe (exit 2)" \
+    'verify_usage --probe "approval subagent" stub/stub; [ $? = 2 ] && [ ! -s "$work/stub.log" ]'
+fi
+# The live tier fails a probe whose answer declines the task as an attached file's instructions, and
+# skips one that only mentions the file. Fixtures hold real refusals and answers that must stay SKIP.
+for answer in "$fixtures"/answers/declined-*.md; do
+  check "declined-task pattern matches $(basename "$answer")" 'grep -qiE -f "$fixtures/declined-task.ere" "$answer"'
+done
+for answer in "$fixtures"/answers/skip-*.md; do
+  check "declined-task pattern ignores $(basename "$answer")" 'grep -qiE -f "$fixtures/declined-task.ere" "$answer"; [ $? = 1 ]'
+done
 
 echo "== omp CLI (no prompts sent)"
 if ! command -v omp > /dev/null; then
