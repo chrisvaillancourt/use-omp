@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"edge","cwd":"/work"}
+{"type":"agent_start"}
+{"type":"tool_execution_start","toolCallId":"9","toolName":"task","args":{}}
+{"type":"tool_execution_end","toolCallId":"9","toolName":"task","isError":false,"result":{"details":{"results":[{"aborted":true,"exitCode":1,"usage":{"cost":{"total":0.002}}},{"aborted":false,"exitCode":0,"usage":{"cost":{"total":0.003}}}]}}}
+{"type":"message_end","message":{"role":"assistant","provider":"p","model":"m","stopReason":"stop","content":[{"type":"text","text":"done"}],"usage":{"totalTokens":10,"cost":{"total":0.001}}}}
+{"type":"agent_end"}

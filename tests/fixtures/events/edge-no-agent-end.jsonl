@@ -1,0 +1,3 @@
+{"type":"session","version":3,"id":"edge","cwd":"/work"}
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"assistant","provider":"p","model":"m","stopReason":"stop","content":[{"type":"text","text":"done"}],"usage":{"totalTokens":10,"cost":{"total":0.001}}}}

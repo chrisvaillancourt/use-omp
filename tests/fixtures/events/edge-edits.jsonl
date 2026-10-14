@@ -1,0 +1,11 @@
+{"type":"session","version":3,"id":"edge","cwd":"/work"}
+{"type":"agent_start"}
+{"type":"tool_execution_start","toolCallId":"1","toolName":"edit","args":{"input":"*** Begin Patch\n[src/a.ts#ABCD]\nPUT 3.=3:\n+x\n*** End Patch"}}
+{"type":"tool_execution_start","toolCallId":"2","toolName":"edit","args":{"input":"*** Begin Patch\n*** Update File: lib/b.py\n@@\n-x\n+y\n*** Add File: lib/c.py\n+z\n*** End Patch"}}
+{"type":"tool_execution_start","toolCallId":"3","toolName":"write","args":{"path":"/tmp/refused.txt","content":"hi"}}
+{"type":"tool_execution_end","toolCallId":"3","toolName":"write","isError":true,"result":{"content":[{"type":"text","text":"Tool \"write\" requires approval but no interactive UI available."}]}}
+{"type":"tool_execution_start","toolCallId":"4","toolName":"ast_edit","args":{"ops":[],"paths":["src/**/*.ts"]}}
+{"type":"tool_execution_start","toolCallId":"5","toolName":"write","args":{"path":"agent://Helper","content":"note"}}
+{"type":"tool_execution_start","toolCallId":"6","toolName":"edit","args":{"input":"unparseable"}}
+{"type":"message_end","message":{"role":"assistant","provider":"p","model":"m","stopReason":"stop","content":[{"type":"text","text":"done"}],"usage":{"totalTokens":10,"cost":{"total":0.001}}}}
+{"type":"agent_end"}

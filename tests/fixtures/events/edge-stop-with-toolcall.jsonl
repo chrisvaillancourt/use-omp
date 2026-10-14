@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"edge","cwd":"/work"}
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"assistant","provider":"p","model":"m","stopReason":"stop","content":[{"type":"text","text":"checking"},{"type":"toolCall","id":"t1","name":"read","arguments":{}}],"usage":{"totalTokens":10,"cost":{"total":0.001}}}}
+{"type":"agent_end"}
