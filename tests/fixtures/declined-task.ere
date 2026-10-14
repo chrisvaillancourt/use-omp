@@ -1,1 +1,1 @@
-(can.{1,3}t|cannot|won.{1,3}t|will not|unable to|refuse to)[^.]*(follow|comply|act on|carry out|execute|obey)[^.]*(instructions|task)[^.]*(attach|provided|embedded|file)
+(can't|can’t|cannot|can not|won't|won’t|will not|unable to|not able to|refuse to|decline to)[^.]*(follow|comply|act on|carry out|execute|obey)[^.]*(instructions|task)[^.]*(^|[^[:alnum:]_])(file|attachment)([^[:alnum:]_]|$)

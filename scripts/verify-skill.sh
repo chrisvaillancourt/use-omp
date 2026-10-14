@@ -15,10 +15,10 @@ while [ $# -gt 0 ]; do
   case $1 in
     --probe)
       [ $# -ge 2 ] || usage_error "--probe needs a name"
-      case $2 in
-        normal|resume|deadline|approval|subagent|bash) selected="$selected $2" ;;
-        *) usage_error "unknown probe '$2' (one of: $probes)" ;;
-      esac
+      known=no
+      for p in $probes; do [ "$2" = "$p" ] && known=yes; done
+      [ "$known" = yes ] || usage_error "unknown probe '$2' (one of: $probes)"
+      selected="$selected $2"
       shift 2 ;;
     -h|--help) sed -n '2,9s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) usage_error "unknown option $1" ;;
@@ -44,7 +44,9 @@ skip() { printf 'SKIP  %s\n' "$1"; inconclusive=$((inconclusive + 1)); }
 check() { if eval "$2"; then pass "$1"; else fail "$1"; fi; }
 
 echo "== free tier (scripts/test-offline.sh)"
-if bash "$repo/scripts/test-offline.sh" > "$work/offline.txt" 2>&1; then
+if [ -n "${USE_OMP_OFFLINE_NESTED:-}" ]; then
+  echo "(skipped: the free tier started this run)"
+elif bash "$repo/scripts/test-offline.sh" > "$work/offline.txt" 2>&1; then
   pass "offline tests ($(grep -c '^PASS' "$work/offline.txt") checks)"
 else
   fail "offline tests: $(grep -c '^FAIL' "$work/offline.txt") failed (see $work/offline.txt)"
@@ -72,12 +74,15 @@ field() { jq -r "$2" "$work/$1.summary.json"; }
 # inconclusive <run> <probe>: the model never made the tool call the probe needs. If its answer declines
 # the task as instructions inside an attached file, that is a failure, not a SKIP: a caller would see a
 # looks_complete run that did nothing. The pattern is in tests/fixtures/declined-task.ere, one extended
-# regular expression per line, and the free tier checks it against tests/fixtures/answers/.
+# regular expression per line, matched against the answer joined into one line; the free tier checks it
+# against tests/fixtures/answers/.
 inconclusive() {
   local answer
   answer="$(field "$1" .run_dir)/answer.md"
-  if grep -qiE -f "$repo/tests/fixtures/declined-task.ere" "$answer" 2> /dev/null; then
-    fail "$2: the model declined the task as instructions inside an attached file: \"$(head -c 160 "$answer" | head -1)\" ($answer)"
+  local refusal
+  refusal=$(tr '\r\n' '  ' < "$answer" 2> /dev/null | grep -m 1 -oiE -f "$repo/tests/fixtures/declined-task.ere" | head -c 160)
+  if [ -n "$refusal" ]; then
+    fail "$2: the model declined the task as instructions inside an attached file: \"$refusal\" ($answer)"
   else
     skip "$2: the model never made the tool call, so the probe is inconclusive"
   fi

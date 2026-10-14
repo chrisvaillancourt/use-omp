@@ -81,9 +81,11 @@ cat > "$stub/omp" <<'STUB'
 [ "${1:-}" = --version ] && { echo omp/stub; exit 0; }
 { echo "umask=$(umask)"; echo "pwd=$PWD"; printf 'arg=%s\n' "$@"; } > "$STUB_LOG"
 [ -n "${STUB_SLEEP:-}" ] && { trap 'exit 143' TERM; sleep "$STUB_SLEEP" & wait $!; }
-printf '%s\n' '{"type":"session","id":"stub-session"}' '{"type":"agent_start"}' \
-  '{"type":"message_end","message":{"role":"assistant","provider":"stub","model":"stub","stopReason":"stop","content":[{"type":"text","text":"ok"}]}}' \
-  '{"type":"agent_end"}'
+# STUB_ANSWER names a file whose text becomes the final answer; the default answer is "ok".
+jq -cn --arg text "$(if [ -n "${STUB_ANSWER:-}" ]; then cat "$STUB_ANSWER"; else echo ok; fi)" \
+  '{type: "session", id: "stub-session"}, {type: "agent_start"},
+   {type: "message_end", message: {role: "assistant", provider: "stub", model: "stub", stopReason: "stop", content: [{type: "text", text: $text}]}},
+   {type: "agent_end"}'
 STUB
 chmod +x "$stub/omp"
 stub_state="$work/stub-state"
@@ -154,14 +156,27 @@ else
   check "verify-skill.sh rejects a second model argument (exit 2)" 'verify_usage stub/stub other/model; [ $? = 2 ] && [ ! -s "$work/stub.log" ]'
   check "verify-skill.sh rejects several probe names in one --probe (exit 2)" \
     'verify_usage --probe "approval subagent" stub/stub; [ $? = 2 ] && [ ! -s "$work/stub.log" ]'
+  # verify_probe <answer fixture>: the approval probe against a stub that answers with the fixture's text
+  # and makes no tool call.
+  verify_probe() {
+    USE_OMP_OFFLINE_NESTED=1 PATH="$stub:$PATH" STUB_LOG="$work/probe-stub.log" STUB_ANSWER="$1" \
+      USE_OMP_STATE_DIR="$work/probe-state" USE_OMP_SESSION_DIR="$work/probe-sessions" \
+      bash "$repo/scripts/verify-skill.sh" --probe approval stub/stub > "$work/probe.out" 2>&1
+  }
+  check "verify-skill.sh fails a probe whose answer declines the task across two lines, quoting the refusal" \
+    'verify_probe "$fixtures/answers/declined-wrapped.md"; grep -q "^FAIL  read-only refusal: the model declined .*follow instructions embedded in the provided file" "$work/probe.out"'
+  check "verify-skill.sh skips a probe whose answer only mentions the file" \
+    'verify_probe "$fixtures/answers/skip-as-requested.md"; grep -q "^SKIP  read-only refusal" "$work/probe.out"'
 fi
 # The live tier fails a probe whose answer declines the task as an attached file's instructions, and
 # skips one that only mentions the file. Fixtures hold real refusals and answers that must stay SKIP.
+# Match as verify-skill.sh does: the answer joined into one line, so a wrapped sentence still matches.
+declined() { tr '\r\n' '  ' < "$1" | grep -qiE -f "$fixtures/declined-task.ere"; }
 for answer in "$fixtures"/answers/declined-*.md; do
-  check "declined-task pattern matches $(basename "$answer")" 'grep -qiE -f "$fixtures/declined-task.ere" "$answer"'
+  check "declined-task pattern matches $(basename "$answer")" 'declined "$answer"'
 done
 for answer in "$fixtures"/answers/skip-*.md; do
-  check "declined-task pattern ignores $(basename "$answer")" 'grep -qiE -f "$fixtures/declined-task.ere" "$answer"; [ $? = 1 ]'
+  check "declined-task pattern ignores $(basename "$answer")" 'declined "$answer"; [ $? = 1 ]'
 done
 
 echo "== omp CLI (no prompts sent)"

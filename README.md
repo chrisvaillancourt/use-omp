@@ -108,7 +108,7 @@ scripts/verify-skill.sh openai-codex/gpt-6-luna:low  # after every omp upgrade: 
 scripts/verify-skill.sh --probe subagent openai-codex/gpt-6-luna:low  # rerun one probe
 ```
 
-**Free tier** (`scripts/test-offline.sh`, 73 checks). Run it after any skill edit. It covers:
+**Free tier** (`scripts/test-offline.sh`, 82 checks). Run it after any skill edit. It covers:
 
 - `summarize-events.jq` against fixtures in `tests/fixtures/events/`. Six are trimmed events from real omp 18.10.3 runs, with local paths and provider response IDs removed: a normal run, a deadline, a refused tool, an inline subagent, a background subagent, and a backgrounded bash command. The rest are edge cases: a final `stop` that still carries a tool call, `pause_turn`, a missing `agent_end`, empty text, odd records, a truncated stream, patch-format edits, a session transcript, and a failed subagent.
 - `report.sh` against a ledger fixture with malformed lines, non-ISO dates, non-numeric fields, read-only refusals, and background jobs.
@@ -117,7 +117,7 @@ scripts/verify-skill.sh --probe subagent openai-codex/gpt-6-luna:low  # rerun on
   - the flags it passes, including the typed line that names the task file, the background-job overlay, `--config`, `--read-only`, `--allow-async`, `--resume`, and `--no-record`;
   - the ledger line and private record files;
   - TERM handling and usage errors.
-- `verify-skill.sh` usage errors, which must stop before any model call, and its declined-task pattern against answer fixtures in `tests/fixtures/answers/`.
+- `verify-skill.sh` usage errors, which must stop before any model call; its declined-task pattern against answer fixtures in `tests/fixtures/answers/`; and, through the stub `omp`, a FAIL for a probe whose answer declines the task and a SKIP for one that only mentions the file.
 - omp CLI facts checked without sending a prompt:
   - the flags the skill uses and the `omp models --json` shape;
   - the setting IDs the overlay relies on;
