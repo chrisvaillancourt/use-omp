@@ -1,6 +1,6 @@
 # Design decisions
 
-Each entry records what was decided, why, the evidence, and when to revisit it. Evidence and experiments are described in [the 2026-10-13 audit](2026-10-13-audit.md). Behavior claims were verified against omp 18.10.3 unless noted, and rechecked against the 18.10.4 source diff and live tier.
+Each entry records what was decided, why, the evidence, and when to revisit it. Evidence and experiments are described in [the 2026-10-13 audit](2026-10-13-audit.md). Behavior claims were verified against omp 18.10.3 unless noted, and rechecked against the 18.10.4 and 18.12.3 source diffs and live tiers.
 
 ## 1. JSON event mode is the default launch
 
@@ -14,7 +14,7 @@ Each entry records what was decided, why, the evidence, and when to revisit it. 
 
 **Decision:** A run is complete only when the stream reached `agent_end` and the final assistant message has `stopReason: "stop"`, non-empty text, no pending `toolCall` blocks, and no `pause_turn`. `summarize-events.jq` reports this as `looks_complete`. Agents also check `tool_errors`, `subagent_failures`, and `background_jobs`.
 
-**Why:** omp exits 1 only for a final `error`/`aborted` stop reason, strict MCP startup failure, session-store durability failure, or a launch failure. It exits 0 for a deadline that lands before the first answer (a 1-second probe exited 0 with no assistant message), for `length` stops, for refused or failed tool calls, and for runs whose background subagents were cancelled. omp continues after a `stop` that carries tool calls or a `pause_turn`, so those are not final.
+**Why:** omp exits 1 only for a final `error`/`aborted` stop reason, strict MCP startup failure, session-store durability failure, or a launch failure. It exits 0 for a deadline that lands before the first answer (a 1-second probe exited 0 with no assistant message), for `length` stops (since 18.12.3, not when its length-stop recovery gives up), for refused or failed tool calls, and for runs whose background subagents were cancelled. omp continues after a `stop` that carries tool calls or a `pause_turn`, so those are not final.
 
 ## 3. A wrapper script instead of a hand-assembled recipe
 
@@ -71,7 +71,7 @@ Each entry records what was decided, why, the evidence, and when to revisit it. 
 
 **Why not change the global settings:** in the TUI, background jobs let the primary agent keep working while subagents and long commands run, and the TUI waits for them. The loss happens only in print mode.
 
-**Revisit if:** omp's print mode starts waiting for background work (the TUI's settle loop in `event-controller.ts` has no print-mode counterpart in 18.10.3 or 18.10.4), or either setting ID is renamed. The offline tests check that both IDs still exist.
+**Revisit if:** omp's print mode starts waiting for background work (the TUI's settle loop in `event-controller.ts` has no print-mode counterpart from 18.10.3 through 18.12.3), or either setting ID is renamed. The offline tests check that both IDs still exist.
 
 ## 7. Preserve the user's omp configuration otherwise
 

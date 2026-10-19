@@ -60,7 +60,7 @@ Capture stdout and stderr separately and retain the process exit code. Store tra
 
 ## Read the event stream
 
-The first line is a `session` header (`version`, `id`, `cwd`, `timestamp`). Events that matter to a caller (omp 18.10.4):
+The first line is a `session` header (`version`, `id`, `cwd`, `timestamp`). Events that matter to a caller (omp 18.12.3):
 
 - `message_update`: incremental deltas only, with no message snapshot. Not an authoritative message.
 - `message_end`: complete message. For `message.role == "assistant"`, it carries `content[]` (`text`, `thinking`, and `toolCall` blocks), `provider`, `model`, `stopReason`, optional `errorMessage`, and `usage` (`input`, `output`, `cacheRead`, `cacheWrite`, `totalTokens`, `cost.total`).
@@ -98,10 +98,10 @@ jq -r 'select(.type == "message_end" and .message.role == "assistant") | .messag
 
 ## Exit status and completion
 
-In both text and JSON print modes (18.10.4), exit 1 means the last assistant message ended with `stopReason` `error` or `aborted`, a strict MCP startup failure, a session-store durability failure, or a launch failure before the model is called (for example `Error: File not found` for a missing `@file`). Usage errors exit 2. Signals exit 130, 143, or 129. Everything else exits 0, including:
+In both text and JSON print modes (18.12.3), exit 1 means the last assistant message ended with `stopReason` `error` or `aborted`, a strict MCP startup failure, a session-store durability failure, or a launch failure before the model is called (for example `Error: File not found` for a missing `@file`). Usage errors exit 2. Signals exit 130, 143, or 129. Everything else exits 0, including:
 
 - A `--max-time` deadline that expires between turns or before the first answer. A 1-second deadline exited 0 with no assistant message. A deadline that interrupts a model turn records `aborted` and exits 1.
-- `stopReason` `length`.
+- `stopReason` `length`, unless omp's length-stop recovery gives up. Since 18.12.3, print mode waits for that recovery to settle, so a run that ends with `Length-stop recovery gave up …` exits 1. In JSON mode that error arrives as a `notice` event (`level` `error`), and the last `message_end` can still show `length`.
 - Tool calls refused for lack of approval, or that failed for any other reason.
 
 So check the final message, not the exit code: complete means the stream reached `agent_end` and the final assistant message has `stopReason` `stop`, non-empty text, no `toolCall` blocks, and no `stopDetails.type` of `pause_turn`. omp keeps working after a `stop` that carries tool calls or a `pause_turn`. A `toolUse` message is not a final answer. Even a normal stop does not establish that the requested task succeeded; inspect the result.
