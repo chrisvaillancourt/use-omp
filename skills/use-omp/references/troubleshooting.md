@@ -12,7 +12,7 @@ With `async.enabled: true` (omp's default), the task tool starts subagents as ba
 
 ## Refused or failing tools
 
-`Tool "<name>" requires approval but no interactive UI available` means the effective approval mode or a per-tool policy needs a prompt for that call, and print mode cannot show one. The child sees a tool error and may answer without that evidence. Check `tool_errors` in the run summary. Under `--read-only` these refusals are expected, and the child's findings are static analysis it could not test; rerun without `--read-only` in an isolated worktree when findings need proof. Otherwise ask the user before raising the approval mode; do not add `--auto-approve` to get past it.
+`Tool "<name>" requires approval but no interactive UI available` means the effective approval mode or a per-tool policy needs a prompt for that call, and print mode cannot show one. The child sees a tool error and may answer without that evidence. Check `tool_errors` in the run summary; ordinary failed commands land there too, so look for `requires approval`. Under `--read-only` these refusals are expected, and the child's findings are static analysis it could not test; rerun without `--read-only` in an isolated worktree when findings need proof. Otherwise ask the user before raising the approval mode; do not add `--auto-approve` to get past it.
 
 ## A refusal that looks complete
 
@@ -21,6 +21,12 @@ The task file arrives as an attachment, and a model can decline it as untrusted 
 Signs: the answer talks about the attached file instead of doing the task, and `tool_calls` is empty for a task that needed tools.
 
 Fix: `run-omp.sh` follows the file with a typed line that names it as the task; a direct launch needs the same line after `--`. If a run still declines, rerun it. If it repeats, write the task file as the user's direct request (who is asking and why) rather than a bare list of tool steps.
+
+## A resume that fails after its worktree was removed
+
+`--resume` exits 1 before any event with `Session "…" belongs to a directory that no longer exists (…); run interactively to move it into the current project.` The session was recorded in a workspace that has since been deleted, typically an earlier review round's worktree. Print mode has no UI to confirm the move, so it refuses. Observed 2026-10-20 on omp 18.12.3, in round 3 of a three-round PR review that made a new worktree for each round. omp moves a session out of a removed worktree on its own only when the session sits in that repository's own session folders (`session/session-manager.ts` `isFromRemovedWorktree`), and the wrapper's delegations folder is not one of them. The run summary's `final_error` carries the message.
+
+Fix: start a fresh run and give it the previous run's `answer.md` as context. To avoid it, keep one worktree per review across rounds and move it to each new commit (`git -C <path> checkout --detach <commit>`, then bootstrap again), removing it only after the last follow-up.
 
 ## Launch errors
 

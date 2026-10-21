@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"edge-fallback","cwd":"/work","timestamp":"2026-10-21T00:00:00.000Z"}
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"assistant","provider":"z","model":"final","stopReason":"error","errorMessage":"capacity","content":[]}}
+{"type":"message_end","message":{"role":"assistant","provider":"a","model":"first","stopReason":"toolUse","content":[{"type":"toolCall","id":"c1","name":"read","arguments":{}}]}}
+{"type":"message_end","message":{"role":"assistant","provider":"z","model":"final","stopReason":"stop","content":[{"type":"text","text":"done"}]}}
+{"type":"agent_end"}

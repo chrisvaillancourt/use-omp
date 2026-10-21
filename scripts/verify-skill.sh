@@ -54,17 +54,16 @@ else
 fi
 echo "== live tier"
 
-# Probes run with memory off: with a memory backend enabled, omp reads and writes the workspace's memory
-# bank, so earlier runs could answer a probe (a resume check could pass from memory) and test runs would
-# add entries to the user's real bank.
-printf 'memory:\n  backend: off\n' > "$work/no-memory.yml"
+# Probes run with memory off, the wrapper's default: with a memory backend enabled, omp reads and writes a
+# memory bank, so earlier runs could answer a probe (a resume check could pass from memory) and test runs
+# would add entries to the user's real bank. Section 7 checks that every probe ran with it off.
 
 # run <name> <prompt text> [run-omp.sh options...]: one recorded run through the wrapper.
 run() {
   local name=$1 prompt=$2; shift 2
   printf '%s\n' "$prompt" > "$work/$name.task.md"
   bash "$skill/scripts/run-omp.sh" --workspace "$repo" --model "$model" --thinking low --label "verify $name" \
-    --prompt-file "$work/$name.task.md" --config "$work/no-memory.yml" "$@" > "$work/$name.summary.json" 2> "$work/$name.stderr.txt"
+    --prompt-file "$work/$name.task.md" "$@" > "$work/$name.summary.json" 2> "$work/$name.stderr.txt"
   echo $? > "$work/$name.exit"
   jq -e . "$work/$name.summary.json" > /dev/null 2>&1 || echo '{}' > "$work/$name.summary.json"
   ran="$ran $name"
@@ -195,6 +194,8 @@ runs=$(set -- $ran; echo $#)
 check "ledger has one line per run ($runs)" '[ "$(wc -l < "$work/state/runs.jsonl" | tr -d " ")" = "$runs" ]'
 check "ledger lines link run directories that exist" \
   '[ "$(jq -r .run_dir "$work/state/runs.jsonl" | while read -r d; do [ -d "$d" ] && echo ok; done | wc -l | tr -d " ")" = "$runs" ]'
+check "every probe ran with memory off (the wrapper's default)" \
+  '[ "$(jq -s "map(select(.memory_off == true)) | length" "$work/state/runs.jsonl")" = "$runs" ]'
 check "report.sh counts the runs" '[ "$(bash "$skill/scripts/report.sh" --json | jq .overall.runs)" = "$runs" ]'
 
 for name in $ran; do

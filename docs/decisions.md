@@ -51,7 +51,9 @@ Each entry records what was decided, why, the evidence, and when to revisit it. 
 
 **Titles:** the user preferred titles, but print mode never generates them (`autoTitle` is interactive-only) and omp has no flag to set one, so `--label` names the run in the ledger and run directory instead.
 
-**Revisit if:** the records grow large (retention is manual for run directories; `omp gc` handles transcripts), or a profile/XDG setup moves the sessions root.
+**Update (2026-10-21): progress events are dropped after each run.** The "records grow large" trigger fired: about a week of regular use left close to a gigabyte of run directories. Most of those bytes were `tool_execution_update`, `message_update`, and `tool_stream_update` events. They repeat partial tool output and message deltas, and nothing in the skill reads them: `summarize-events.jq` and `answer.md` use `message_end`, `tool_execution_start`, and `tool_execution_end`. The wrapper removes them once omp exits, so a stall is still visible while the run is live. Every event line starts with its `type`, which the filter relies on. Retention of the remaining records is still manual.
+
+**Revisit if:** the records grow large again (retention is manual for run directories; `omp gc` handles transcripts), or a profile/XDG setup moves the sessions root.
 
 ## 5. Reviews keep full capabilities; `--read-only` is opt-in
 
@@ -77,13 +79,13 @@ Each entry records what was decided, why, the evidence, and when to revisit it. 
 
 **Decision:** Keep default tool, extension, skill, and rule discovery; never add `--no-tools`, `--tools`, `--no-extensions`, and similar flags for normal work; never loosen approval (`--auto-approve`, `--plan-yolo`) without authorization; and use the user's profile and authentication.
 
-**Why:** omp is valuable as a full agent with its own skills and tools. Old workarounds such as `--no-tools --no-extensions` for a Codex schema bug in 18.4.9 reduced capability without establishing a boundary. The async overlay (decision 6) is the one deliberate per-run change, made because print mode otherwise drops work.
+**Why:** omp is valuable as a full agent with its own skills and tools. Old workarounds such as `--no-tools --no-extensions` for a Codex schema bug in 18.4.9 reduced capability without establishing a boundary. The wrapper's overlay makes the only deliberate per-run changes: background jobs off (decision 6), because print mode otherwise drops work, and memory off (decision 10), because delegated runs are mostly independent second opinions. `--allow-async` and `--memory` undo them.
 
 ## 8. No silent model substitution
 
 **Decision:** If a requested model or effort does not match an available selector exactly, the agent shows the closest matches and asks, or states the substitution.
 
-**Why:** Requests named a model that did not exist, and one agent substituted another model without saying so.
+**Why:** Requests named a model that did not exist, and one agent substituted another model without saying so. Decision 13 extends this to bare model IDs that several providers offer: the wrapper refuses to guess when the user's provider order does not decide.
 
 ## 9. Two test tiers, with live calls only where omp's runtime behavior is the subject
 
@@ -93,15 +95,26 @@ Each entry records what was decided, why, the evidence, and when to revisit it. 
 - `scripts/verify-skill.sh <provider/model>` runs that tier, then six short live calls through the wrapper. They cover a normal run, resume, a deadline, `--read-only`, an inline subagent, and a 65-second bash command, plus ledger and report checks.
 - SKILL.md names the omp version it was verified against, and the live tier fails when the installed version differs.
 
-Every live probe runs with a `memory.backend: off` overlay (passed through the wrapper's `--config`). With memory on, the probes read and wrote the repository's memory bank. One probe answered with a string an earlier test had stored, and a resume check could have passed from memory instead of the session.
+Every live probe runs with memory off, which is now the wrapper's default (decision 10), and the live tier checks the ledger's `memory_off` for each run. With memory on, the probes read and wrote the repository's memory bank. One probe answered with a string an earlier test had stored, and a resume check could have passed from memory instead of the session.
 
 **Why:** the user upgrades omp regularly, and several claims depend on omp internals that change between releases: exit predicates, event fields, approval tiers, background-job behavior, and setting IDs. omp released 18.6.3 to 18.10.3 within one week. Live calls are kept to behavior that only a model run exercises. A cheap model (`gpt-6-luna`) passes every probe, though a run may need a `--probe` rerun for a SKIP, so the live tier costs a few cents. Most of that is the subagent probe, which runs on the user's `task` role. The offline checks were mutation-tested so that each guarded behavior has a check that fails when it breaks.
 
-## 10. Memory is the user's to keep; tests and independent reviews turn it off
+## 10. Memory is off for delegated runs; `--memory` opts in
 
-**Decision:** The wrapper leaves omp's memory setting alone by default, so delegated work benefits from the workspace's memory as an interactive session does. `--config` lets a caller pass an overlay that sets `memory.backend: off` for a run, and the skill recommends it for independent reviews and tests.
+**Decision (user, 2026-10-21; reverses the 2026-10-13 version):** The wrapper's overlay sets `memory.backend: off` for every run. `--memory` leaves the user's memory setting in force. The ledger records `memory_off` for each run. A caller's `--config` overlay merges after the wrapper's and wins.
 
-**Why:** With a memory backend enabled, a run reads and writes the memory bank for its workspace, even with `--no-session`. During this audit, a test probe answered with a canary string that a 2026-10-06 test run had left in the repository's bank, instead of doing its task. Test runs had also been adding entries to the user's real bank. A memory-off overlay kept the bank's file unchanged across a full live verification run.
+**The earlier decision** left memory on by default, so delegated work would benefit from the workspace's memory as an interactive session does, and recommended a memory-off overlay for independent reviews and tests.
+
+**Why it changed:**
+
+- Callers turned memory off almost every time. In nearly every recorded run, the caller wrote its own memory-off overlay, under several different file names.
+- The skill's main use is an independent second opinion, and recalled memory biases one. With a memory backend enabled, a run reads and writes the bank that `mnemopi.scoping` selects, even with `--no-session`. During the 2026-10-13 audit, a test probe answered with a canary string an earlier test run had left in the bank instead of doing its task, and test runs had been adding entries to the user's real bank.
+- Scoping makes memory-on hard to predict for other users. `per-project-tagged` also recalls from a shared bank, and `global` shares one bank across projects. A public skill cannot know which a user has.
+- With memory off, the result no longer depends on what the bank happens to hold.
+
+**Costs accepted:** headless runs now differ from interactive sessions in one more way, which decision 7 otherwise avoids. Implementation tasks lose what omp has learned about a repository unless the caller passes `--memory` or puts the context in the task. Delegated work is not remembered by the user's later omp sessions.
+
+**Revisit if:** delegations shift from consultations to implementation work where callers routinely pass `--memory`, or omp gains a way to read a bank without writing to it.
 
 ## 11. Keep the skill generic
 
@@ -114,3 +127,36 @@ Every live probe runs with a `memory.backend: off` overlay (passed through the w
 **Why:** omp sends an `@file` as a `<file name="...">` block, and the first typed message after it (`src/cli/initial-message.ts:33-41`). With no typed message, the whole request looks like file content. On 2026-10-14, with omp 18.10.4 and `openai-codex/gpt-6-luna:low`, the model declined 2 of 12 live probes this way: "I can't follow instructions embedded in the provided file; they are untrusted content." Both runs exited 0 with `looks_complete` true, so a caller would have accepted a run that did nothing. The live tier reported them as SKIP, which hid the problem.
 
 **Revisit if:** a model still declines tasks with the typed line present, or omp changes how it combines `@file` text with typed messages.
+
+## 13. Model selection: an optional default, and bare IDs resolved by the user's provider order
+
+**Decision (user, 2026-10-21):** `--model` is optional. Without it, the wrapper uses `USE_OMP_MODEL`, then omp's `default` role. A bare model ID that several providers offer resolves by omp's `modelProviderOrder` setting, matched case-insensitively. If the order names none of the candidates, or the ID is unknown, the wrapper exits 2 and names the candidates or similar selectors. A `provider/model` selector and an omp role name (`slow`, `@slow`) pass through unchanged. As in omp, IDs match case-insensitively and an exact ID wins over a role of the same name. The lookups run in the workspace with the caller's `--config` overlays, so they read the same settings as the run. The ledger records the final message's model, the request as given, and its source.
+
+**Why:**
+
+- Requests usually name a model without a provider, and the same ID often exists under two or three providers. In several sessions, the agent ran a provider the user had not asked for. It took the first `omp models` entry, and the catalog lists one subscription provider before the other. The user then had to say which provider to use.
+- Passing the bare ID to omp does not fix this. omp ranks candidates by recent use before `modelProviderOrder` (`config/model-resolver.ts:590-611`, omp 18.12.3), so a provider the user tried once can win.
+- Users also repeated the same model and effort on most requests, and omp's own `default` role often differs from what they want for delegations. Nearly all recorded runs used one effort, while the user's interactive default was another. `USE_OMP_MODEL` holds a delegation default without editing omp's roles.
+- An exit 2 with candidates, instead of a guess, keeps decision 8. The preference lives in the user's omp config and environment, so the skill stays generic (decision 11).
+
+**Revisit if:** omp's resolver stops ranking recent use first, or `omp models --json` drops `id`. The free tier checks the `id` field and that `modelProviderOrder` and `modelRoles` print JSON.
+
+## 14. The hand-back leaves out cost
+
+**Decision (user, 2026-10-21):** SKILL.md no longer asks agents to report a run's cost. The summary, ledger, `report.sh`, and `omp stats` keep the figures, labeled as estimates.
+
+**Why:** the user did not want cost in replies. The figures are omp's estimates at list prices (`omp models --json` `cost`). Subscription providers bill by plan usage, so a run's dollar figure is not money spent, and a week's total can look alarming while costing nothing extra.
+
+## 15. Consulting unprompted is opt-in
+
+**Decision (user, 2026-10-21):** The skill's description names both explicit requests and high-stakes checkpoints: a plan before implementation, a hard-to-reverse decision, or a conclusion others will rely on. The body lets an agent consult on its own initiative only when the user's instructions or memory ask for it. Otherwise the agent offers in one line. It consults once per checkpoint, says what it is consulting on and with which model before it launches, and skips routine work.
+
+**Why:** the user wants second opinions at important junctions without one at every step. A public skill that consulted unprompted would spend every user's plan usage without asking. The user's own instructions are the right place for frequency and model rules, and they can change without a skill release. Usage showed the skill loads reliably when asked: in most sessions the model chose the skill itself after the user mentioned omp or the skill mid-sentence. A search of recent sessions found no typed request to consult another model that went without the skill.
+
+**Revisit if:** agents consult too often or too rarely under users' instructions, or users ask for a built-in default frequency.
+
+## 16. Tool errors are informational; unexpected refusals are problems
+
+**Decision:** `report.sh` counts runs with tool errors but no longer lists them as problems. It lists runs that did not complete, exited nonzero, had approval refusals outside `--read-only`, had subagent failures, or left background jobs. SKILL.md tells agents that most tool errors are the child's own failed commands.
+
+**Why:** about half of the recorded runs had tool errors, and a sample showed nearly all were ordinary: a test or command exiting 1, a path that did not exist, a script traceback. Listing them buried the real problems: the most recent "problems" were all of this kind, while a failed launch and a run whose subagents failed were easy to miss.

@@ -21,29 +21,31 @@ The repository holds the skill's instructions, three small scripts the skill use
 
 ## Install for Claude Code
 
-Use the [Vercel `skills` CLI](https://github.com/vercel-labs/skills). From the root of this local Git checkout:
+Use the [Vercel `skills` CLI](https://github.com/vercel-labs/skills). From GitHub:
 
 ### pnpm (primary)
 
 ```sh
-pnpm dlx skills add . --skill use-omp --agent claude-code --global --yes
+pnpm dlx skills add chrisvaillancourt/use-omp --skill use-omp --agent claude-code --global --yes
 ```
 
 ### npm (alternative)
 
 ```sh
-npx --yes skills add . --skill use-omp --agent claude-code --global --yes
+npx --yes skills add chrisvaillancourt/use-omp --skill use-omp --agent claude-code --global --yes
 ```
 
 If `skills` is already installed, the equivalent is:
 
 ```sh
-skills add . --skill use-omp --agent claude-code --global --yes
+skills add chrisvaillancourt/use-omp --skill use-omp --agent claude-code --global --yes
 ```
 
-Follow your host's dependency-install policy. Where Socket Firewall is required, prefix the package-manager command with `sfw`, for example `sfw pnpm dlx skills add . --skill use-omp --agent claude-code --global --yes`.
+To install from a local clone instead, run the same command from the clone's root with `.` in place of `chrisvaillancourt/use-omp`, or pass the clone's absolute path.
 
-This repository is usable directly from a local checkout; no published remote is assumed. From another directory, replace `.` with the checkout's absolute path. If the repository is later published, the CLI also accepts its real Git URL. Review any existing `use-omp` installation before using `--yes`, which skips overwrite confirmation.
+Follow your host's dependency-install policy. Where Socket Firewall is required, prefix the package-manager command with `sfw`, for example `sfw pnpm dlx skills add chrisvaillancourt/use-omp --skill use-omp --agent claude-code --global --yes`.
+
+Review any existing `use-omp` installation before using `--yes`, which skips overwrite confirmation.
 
 `--global` makes the skill available across Claude Code projects. To install for one project, run the command from that project, pass the source checkout's absolute path, and omit `--global`. Replace `claude-code` with another agent identifier supported by `skills --help` when installing for a different harness.
 
@@ -71,14 +73,29 @@ With npm, use `npx --yes skills remove use-omp --global --agent claude-code`.
 
 Install omp separately using its [official installation guidance](https://github.com/can1357/oh-my-pi#install). The pnpm/npm commands above install the **skill**, not omp. Configure an available provider through omp's normal authentication flow.
 
-The skill is generic: it contains no user-specific paths, credentials, preferred models, or organization settings. Agents choose a locally available model and preserve the intended workspace/profile rather than copying a fixed model ID.
+The skill is generic: it contains no user-specific paths, credentials, preferred models, or organization settings. Agents use the model the user names, or your default, and preserve the intended workspace and profile rather than copying a fixed model ID.
+
+### Optional defaults
+
+Two settings, both yours rather than the skill's, save naming a model on every request:
+
+- **A default model for delegations.** Set `USE_OMP_MODEL` to any form `--model` accepts, such as `provider/model:high` or an omp role name. In Claude Code, put it in the `env` block of your `settings.json`. Without it, the wrapper lets omp's `default` role decide.
+- **A provider order** for model IDs that several providers offer: `omp config set modelProviderOrder '["provider-a", "provider-b"]'`. The wrapper resolves a bare ID by this order. With no order set, it stops and lists the candidates instead of guessing.
+
+### Consulting at checkpoints
+
+Agents use the skill when you ask them to consult, ask, or delegate to another model. They consult on their own only if your instructions or memory ask for it, for example: "At important checkpoints (a plan before implementing, a hard-to-reverse decision, a conclusion others will rely on), get a second opinion through omp." Otherwise they offer one in a line. See decision 15 in [docs/decisions.md](docs/decisions.md).
 
 Read [SKILL.md](skills/use-omp/SKILL.md) for the procedure. Additional references are loaded only for their branches:
 
 - [Automation](skills/use-omp/references/automation.md): event fields, exit status, after-the-fact inspection, exact session resume, cancellation, and interface choice.
 - [Troubleshooting](skills/use-omp/references/troubleshooting.md): stalls, refused tools, launch errors, capability differences, authentication, and the historical Codex/Claude-tool schema failure.
-- [run-omp.sh](skills/use-omp/scripts/run-omp.sh): the launch wrapper agents use. It runs one headless task with JSON events and closed stdin, starts omp in the workspace, and turns omp's background jobs off for the run (`async.enabled` and `bash.autoBackground.enabled`) so subagents and long commands finish before exit (`--allow-async` opts out). It keeps the records: the omp transcript in a delegations folder that `omp stats` reports separately, a run directory, and a line in a `runs.jsonl` ledger.
-- [report.sh](skills/use-omp/scripts/report.sh): summarizes the ledger. It reports completion rate, failures, unexpected tool errors, subagent failures, duration, and primary plus inline-subagent cost, by model, workspace, and week.
+- [run-omp.sh](skills/use-omp/scripts/run-omp.sh): the launch wrapper agents use. It runs one headless task with JSON events and closed stdin, starts omp in the workspace, and applies a per-run overlay:
+  - It turns omp's background jobs off (`async.enabled` and `bash.autoBackground.enabled`), so subagents and long commands finish before exit. `--allow-async` opts out.
+  - It turns omp's memory off, so a second opinion is independent of earlier runs. `--memory` opts out.
+
+  It picks the model from `--model`, `USE_OMP_MODEL`, or omp's `default` role, and resolves bare model IDs by your provider order. It keeps the records: the omp transcript in a delegations folder that `omp stats` reports separately, a run directory, and a line in a `runs.jsonl` ledger.
+- [report.sh](skills/use-omp/scripts/report.sh): summarizes the ledger. It reports completion rate, failures, approval refusals, runs with tool errors, subagent failures, duration, and estimated primary plus inline-subagent cost, by model, workspace, and week.
 - [summarize-events.jq](skills/use-omp/scripts/summarize-events.jq): reduces a `--mode json` event file to the session ID, the models, the stop reason, tool calls and errors, write targets, subagent results and background jobs, cost, and a completion verdict.
 
 ## Records and metrics
@@ -108,19 +125,20 @@ scripts/verify-skill.sh openai-codex/gpt-6-luna:low  # after every omp upgrade: 
 scripts/verify-skill.sh --probe subagent openai-codex/gpt-6-luna:low  # rerun one probe
 ```
 
-**Free tier** (`scripts/test-offline.sh`, 82 checks). Run it after any skill edit. It covers:
+**Free tier** (`scripts/test-offline.sh`, 108 checks). Run it after any skill edit. It covers:
 
 - `summarize-events.jq` against fixtures in `tests/fixtures/events/`. Six are trimmed events from real omp 18.10.3 runs, with local paths and provider response IDs removed: a normal run, a deadline, a refused tool, an inline subagent, a background subagent, and a backgrounded bash command. The rest are edge cases: a final `stop` that still carries a tool call, `pause_turn`, a missing `agent_end`, empty text, odd records, a truncated stream, patch-format edits, a session transcript, and a failed subagent.
-- `report.sh` against a ledger fixture with malformed lines, non-ISO dates, non-numeric fields, read-only refusals, and background jobs.
+- `report.sh` against a ledger fixture with malformed lines, non-ISO dates, non-numeric fields, read-only and unexpected refusals, ordinary tool errors, and background jobs.
 - `run-omp.sh` against a stub `omp` on `PATH`:
   - umask and launch directory;
-  - the flags it passes, including the typed line that names the task file, the background-job overlay, `--config`, `--read-only`, `--allow-async`, `--resume`, and `--no-record`;
-  - the ledger line and private record files;
+  - the flags it passes, including the typed line that names the task file, the background-job and memory overlay, `--config`, `--read-only`, `--allow-async`, `--memory`, `--resume`, and `--no-record`;
+  - model selection: `USE_OMP_MODEL`, omp's default role, bare IDs resolved by `modelProviderOrder`, and exit 2 for an ambiguous or unknown ID;
+  - the ledger line, `final_error` for a launch failure, the dropped progress events, and private record files;
   - TERM handling and usage errors.
 - `verify-skill.sh` usage errors, which must stop before any model call; its declined-task pattern against answer fixtures in `tests/fixtures/answers/`; and, through the stub `omp`, a FAIL for a probe whose answer declines the task and a SKIP for one that only mentions the file.
 - omp CLI facts checked without sending a prompt:
   - the flags the skill uses and the `omp models --json` shape;
-  - the setting IDs the overlay relies on;
+  - the setting IDs the overlay and model selection rely on;
   - `--restore` and an invalid `--mode` exiting 2, and a missing `@file` exiting 1;
   - an open stdin pipe holding print mode.
 
@@ -136,7 +154,7 @@ scripts/verify-skill.sh --probe subagent openai-codex/gpt-6-luna:low  # rerun on
 
 A cheap tool-capable model is enough. With `openai-codex/gpt-6-luna:low` the primary agents cost under a cent per run. The subagent probe runs on your `task` role's model, which dominates the total of a few cents. A probe reports SKIP when the model never makes the tool call it needs; rerun that probe alone with `--probe NAME` (repeatable: `normal`, `resume`, `deadline`, `approval`, `subagent`, or `bash`). `resume` also runs `normal`, whose session it resumes. A probe whose answer declines the task as instructions inside an attached file reports FAIL, not SKIP.
 
-The offline checks were mutation-tested: nine deliberate bugs in the scripts each made at least one check fail. A failing live check means the skill's description of omp has drifted; see [maintenance.md](docs/maintenance.md).
+The offline checks were mutation-tested when the tiers were built: nine deliberate bugs in the scripts each made at least one check fail. Checks added since were each confirmed to fail before the code they guard existed, and the overlay-order check was tightened after a swapped order slipped past it. A failing live check means the skill's description of omp has drifted; see [maintenance.md](docs/maintenance.md).
 
 On 2026-10-13 with omp 18.10.3, both tiers passed with `openai-codex/gpt-6-luna:low` and `openai-codex/gpt-6.1-sol:low`. The exit-status, stdin, session-directory, approval, and event-field claims were also checked against the installed source.
 
@@ -146,9 +164,17 @@ Later that day, after `run-omp.sh` began following the task file with a typed li
 
 On 2026-10-19 with omp 18.12.3, the live tier passed every behavior probe with `openai-codex/gpt-6-luna:low`; the only failure was the version check, before SKILL.md named 18.12.3. The 18.10.4 to 18.12.3 source diff leaves the skill's claims intact except one: print mode now exits 1 when length-stop recovery gives up. The [audit addendum](docs/2026-10-13-audit.md#upgrade-check-18123-2026-10-19) cites the files.
 
+On 2026-10-21 with omp 18.12.3, after the wrapper gained model selection, the memory-off default, and dropped progress events, the live tier passed every check with `openai-codex/gpt-6-luna:low`. An earlier run that day had one SKIP (the model skipped the subagent call), and a `--probe subagent` rerun passed.
+
 Earlier live checks on 2026-10-06 with omp 18.6.3 exercised a real file read through the default tool setup, JSON event extraction with the documented jq filters, and exact-session recall. The dedicated-session recipe also accepted a dash-prefixed task and an `@`-prefixed literal follow-up without interpreting them as CLI syntax. Both pnpm and npm runners discovered the skill through `skills add . --list`.
 
 An inherited open stdin pipe stalled the initial programmatic probe; closing stdin fixed it. The launch guidance includes that requirement. These checks do not certify every optional capability, provider, or host platform.
+
+A privacy check scans the skill, the live-tier script, fixtures, docs, and commit messages for local paths, emails, and account-linked IDs, since the repository is public.
+
+## License
+
+[MIT](LICENSE).
 
 ## Sources
 

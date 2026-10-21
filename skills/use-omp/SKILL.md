@@ -1,22 +1,40 @@
 ---
 name: use-omp
-description: "Delegate tasks or second-opinion reviews to omp (Oh My Pi), preserve its normal tools and skills in headless calls, resume omp sessions, or troubleshoot a caller-agent's omp integration."
+description: "Consult another model through omp (Oh My Pi) for an independent second opinion, or delegate a task to it. Use when the user asks to consult, ask, or have another model review or double-check work; at a high-stakes checkpoint (a plan before implementing, a hard-to-reverse decision, a conclusion others will rely on) when the user has asked for such consultations; or to resume an omp session or troubleshoot an omp integration. Not for routine edits or facts you can check directly."
 ---
 # Use omp from another agent
 
 Run omp as a separate agent process, not as a bare model API. It can read and modify files, execute commands, and use configured external services. A call does not inherit your conversation or your tool restrictions automatically.
 
+## When to consult without being asked
+
+Use this skill when the user asks you to consult, ask, or delegate to omp or to a model omp provides. Consulting on your own initiative is opt-in: do it only when the user's instructions or memory ask for second opinions at checkpoints, and follow any frequency or model they set there. Otherwise, at a checkpoint that qualifies, offer a consultation in one line and carry on.
+
+A checkpoint qualifies when a mistake would be costly and the work is ready to judge:
+
+- a plan or design, before implementation starts;
+- a decision that is hard to reverse, such as a migration, a deletion, a merge, or a published change;
+- a conclusion, data claim, or deliverable that someone else will rely on.
+
+Skip routine edits, questions that a test or a source check settles, and work that has not changed since the last consultation. Consult once per checkpoint. Before launching, say in one line what you are consulting on and with which model, so the user can stop it. Run it in the background when the host allows, and keep working on whatever does not depend on the answer.
+
 ## 1. Establish the execution contract
 
 Before launching, identify the target workspace, task, permitted changes, expected deliverable, and verification. For a review, say explicitly whether files may change. For implementation, assign disjoint ownership if another agent is editing concurrently; use an isolated worktree when appropriate.
 
-Resolve the installed executable with `command -v omp` and check `omp --version`. This skill was last verified against omp **18.12.3**; on a different version, read `omp --help` before relying on the flags below. List exact selectors with `omp models --json | jq -r '.models[].selector'` (the output is an object with a `models` array, not a bare array). The same model ID can appear under several providers, such as `openai-codex/…` and `github-copilot/…`; pass the full `provider/model` selector. A catalog entry alone does not prove authentication or access.
+Resolve the installed executable with `command -v omp` and check `omp --version`. This skill was last verified against omp **18.12.3**; on a different version, read `omp --help` before relying on the flags below.
 
-If the requested model or effort does not match an available selector exactly, show the closest matches and ask, or state the substitution in your reply. Never substitute silently. Do not copy a model name from an example without checking availability.
+Choose the model from what the user said:
+
+- **No model named:** omit `--model`. The wrapper uses `USE_OMP_MODEL` when it is set, and otherwise lets omp's `default` role decide. If the user named only an effort ("with xhigh reasoning"), pass `--thinking` alone.
+- **A bare model ID** (`some-model`, or `some-model:high`): pass it as given. The same ID can appear under several providers. The wrapper then picks by omp's `modelProviderOrder` setting, read the way the run will read it (the workspace's config plus any `--config` overlays), and prints `model=<selector>` to stderr. With no order set, it exits 2 and lists the candidates: show them to the user and ask which provider to use. If the user wants that choice to stick, suggest `omp config set modelProviderOrder '["provider-a", "provider-b"]'`. Never take the first entry from `omp models`: that order is the catalog's, not the user's preference.
+- **A `provider/model` selector or an omp role name** (`slow`, `@slow`): pass it as given. omp resolves a role with the role's own effort.
+
+If a bare ID matches no available model, the wrapper exits 2 and lists similar selectors. A `provider/model` selector goes to omp unchecked, and an unknown one exits 1 with `Model "…" not found`. Neither the wrapper nor omp checks that the effort suits the model. Show the alternatives and ask, or state the substitution in your reply. Never substitute silently. Do not copy a model name from an example without checking availability. To list exact selectors yourself, use `omp models --json | jq -r '.models[].selector'` (the output is an object with a `models` array, not a bare array). A catalog entry alone does not prove authentication or access.
 
 Use the user's existing installation, profile, and authentication. If omp is absent, consult the [upstream installation instructions](https://github.com/can1357/oh-my-pi#install) and follow the host's installation policy. For authentication failures, use the installed `omp login --help` flow with the user; keep credential values out of prompts, command arguments, and logs.
 
-Done when the executable, workspace, model, reasoning effort, profile (if any), and authorized scope are known.
+Done when the executable, workspace, model (or the decision to use the default), reasoning effort, profile (if any), and authorized scope are known.
 
 ## 2. Preserve the normal capabilities
 
@@ -32,7 +50,7 @@ Headless is not identical to interactive (omp 18.12.3):
 - `--model` and `--thinking` replace the run's `default` role. omp's own subagents use their configured role (for example `task` or `smol`) when the user has one; an unconfigured role falls back to the run's `--model` and possibly its `--thinking`.
 - The task file arrives as a `<file name="...">` attachment. Without a typed message, a model can decline its instructions as untrusted file content, so the wrapper adds one line after it: "The attached file is my task for you. Carry it out." When launching omp directly with `@file`, add a line like it after `--`. Write the file as direct instructions to the agent.
 - `ask` is unavailable, extension prompts get default answers, `--restore` is interactive-only, and print mode ignores `plan.defaultOnStartup`, so an interactive plan-first setting is not a headless review gate.
-- When a memory backend is enabled (`omp config get memory.backend`), the run reads and writes the bank that `mnemopi.scoping` selects, even with `--no-session`. Isolation depends on that setting, not just the workspace path: the default `per-project` keeps one bank per workspace path, `per-project-tagged` writes per project but also recalls from a shared bank, `global` shares one bank, and a project's `.omp/config.yml` can pin one named bank for every checkout. Earlier delegated runs sharing that bank, including test runs, can therefore surface in a new run's context. In one test, a probe answered with a string recalled from an earlier run instead of doing its task. For an independent review or a test, pass `--config` with an overlay that sets `memory.backend` to `off` ([automation.md](references/automation.md#records-and-metrics) shows one); the run then neither reads nor adds to the bank.
+- When a memory backend is enabled (`omp config get memory.backend`), the run reads and writes the bank that `mnemopi.scoping` selects, even with `--no-session`. Isolation depends on that setting, not just the workspace path: the default `per-project` keeps one bank per workspace path, `per-project-tagged` writes per project but also recalls from a shared bank, `global` shares one bank, and a project's `.omp/config.yml` can pin one named bank for every checkout. Earlier delegated runs sharing that bank, including test runs, can therefore surface in a new run's context. In one test, a probe answered with a string recalled from an earlier run instead of doing its task. The wrapper therefore turns memory off for each run by default (`memory.backend: off` in its overlay), so a second opinion does not depend on earlier runs and the run adds nothing to the bank. Pass `--memory` to keep the user's setting, for example for an implementation task that benefits from what omp has learned about the repository. When launching omp directly, pass the same overlay for independent work.
 - omp loads `.env` from the directory it was launched in, not from `--cwd`. The wrapper starts omp in the workspace, as an interactive launch would.
 - `--max-time` also counts startup, including up to 30 seconds of waiting for MCP servers. A server that is not ready loses its tools for the run.
 
@@ -45,7 +63,8 @@ Reviews keep full capabilities. Running tests, scripts, and commands is how a re
 - To review uncommitted or untracked changes, carry them into the copy (for example `git -C <repo> diff HEAD | git -C <path> apply`, then copy the untracked files) and say in the result that the review covers that snapshot.
 - Tell the child to leave tracked files unchanged and to keep scratch files and repro scripts in a temporary directory.
 - Ask it to back each finding with evidence: the command it ran and the output, or a `file:line` citation.
-- Compare `git status` in the user's checkout before and after, and remove the worktree (`git worktree remove <path>`) or clone when the review is done.
+- Compare `git status` in the user's checkout before and after.
+- Keep one worktree or clone per review across rounds, and remove it (`git worktree remove <path>`) only after the last follow-up. Headless omp refuses to `--resume` a session whose workspace directory is gone. For a new round on a new commit, move the same copy to it (`git -C <path> checkout --detach <commit>`, then bootstrap again) instead of removing it and adding another.
 
 `--read-only` is opt-in. Use it (it adds `--approval-mode always-ask`) only when the user asks for it or nothing may execute at all, such as untrusted code. Its effects and side effects:
 
@@ -62,24 +81,26 @@ Done when the launch preserves the intended configuration and any capability dif
 
 ## 3. Launch and collect the result
 
-Write the task to a private UTF-8 file and launch it with the bundled wrapper. Set `skill_dir` to the directory containing this SKILL.md, `workspace` to the project directory (or review worktree), `model` to an exact `provider/model`, and `prompt_file` to the task file's path. The wrapper runs print mode with JSON events and closed stdin, starting omp in the workspace. It keeps the events, stderr, exit code, summary, and final answer in a run directory, and stores omp's transcript for `omp stats`, `--export`, and `--resume`. It appends one line per run to a ledger and prints the run summary as JSON:
+Write the task to a private UTF-8 file and launch it with the bundled wrapper. Set `skill_dir` to the directory containing this SKILL.md, `workspace` to the project directory (or review worktree), and `prompt_file` to the task file's path. Add `--model` only when the user named a model (section 1). The wrapper runs print mode with JSON events and closed stdin, starting omp in the workspace. It keeps the events, stderr, exit code, summary, and final answer in a run directory, and stores omp's transcript for `omp stats`, `--export`, and `--resume`. It appends one line per run to a ledger and prints the run summary as JSON:
 
 ```sh
-bash "$skill_dir/scripts/run-omp.sh" --workspace "$workspace" --model "$model" --thinking medium \
+bash "$skill_dir/scripts/run-omp.sh" --workspace "$workspace" --thinking medium \
   --max-time 30m --label "short purpose" --prompt-file "$prompt_file"
 ```
 
-The final answer is in `answer.md` in the run directory, next to `prompt.md`, `events.jsonl`, `stderr.txt`, `exit.txt`, and `summary.json`. The script prints `run_dir=<path>` to stderr as soon as it starts. Its exit code is omp's, and 2 means a usage error. Options:
+The final answer is in `answer.md` in the run directory, next to `prompt.md`, `events.jsonl`, `stderr.txt`, `exit.txt`, and `summary.json`. The script prints `run_dir=<path>` to stderr as soon as it starts. Its exit code is omp's, and 2 means a usage error, including a model it could not resolve. Options:
 
-- `--resume <session_id>` (from the summary) continues a recorded run. Pass `--model`, `--thinking`, and any `--read-only` again, since they apply per run; the label may differ.
+- `--model MODEL` picks the model (section 1); without it, `USE_OMP_MODEL` or omp's `default` role decides.
+- `--resume <session_id>` (from the summary) continues a recorded run. Pass `--model`, `--thinking`, and any `--read-only` or `--memory` again, since they apply per run; the label may differ. The session's workspace directory must still exist (section 2).
 - `--no-record` makes a disposable run that leaves no transcript or ledger line.
-- `--config FILE` adds an omp config overlay for the run (repeatable), for example one that turns memory off.
+- `--memory` keeps the user's omp memory setting; by default the run has memory off (section 2).
+- `--config FILE` adds an omp config overlay for the run (repeatable). Overlays merge in order after the wrapper's own, so a later one wins.
 - `--allow-async` keeps omp's background-job settings for the run. Use it only when the task itself waits for its background jobs.
 - `--read-only` is opt-in; see section 2 for what it blocks.
 
-`bash "$skill_dir/scripts/report.sh"` summarizes the ledger: completion rate, failures, durations, and cost by model, workspace, and week. The delegations folder in `omp stats` adds token, latency, and cost totals that include subagents. [automation.md](references/automation.md#records-and-metrics) gives the storage locations, the ledger fields, and the raw `omp` command for hosts that cannot run the script.
+`bash "$skill_dir/scripts/report.sh"` summarizes the ledger: completion rate, failures, durations, and estimated cost by model, workspace, and week. The delegations folder in `omp stats` adds token, latency, and cost totals that include subagents. [automation.md](references/automation.md#records-and-metrics) gives the storage locations, the ledger fields, and the raw `omp` command for hosts that cannot run the script.
 
-JSON mode matters even for one-off calls. The events file records each tool call, the edit targets, the model that answered, the stop reason, and the primary agent's token cost. A stalled run shows its last event. Plain `-p` prints only the final message to stdout, so a stall or deadline leaves nothing there to inspect.
+JSON mode matters even for one-off calls. The events file records each tool call, the edit targets, the model that answered, the stop reason, and the primary agent's token cost. A stalled run shows its last event. After omp exits, the wrapper drops the progress-only events (`message_update`, `tool_execution_update`, `tool_stream_update`) from the saved file. They repeat partial output, so they make up most of a run's size, and nothing reads them afterward. Plain `-p` prints only the final message to stdout, so a stall or deadline leaves nothing there to inspect.
 
 Close unused stdin. Print mode reads non-terminal stdin until EOF before starting; an inherited open pipe stalls startup even when a prompt argument is present. Programmatic callers should use an argument array with stdin set to null/ignored (for example Python's `subprocess.DEVNULL`). For intentional stdin input, write the complete prompt and close the pipe.
 
@@ -109,10 +130,10 @@ Done when the child exits and you have the output, diagnostics, and exit status�
 
 ## 4. Verify and hand back
 
-Exit code 0 does not mean the task finished. A `--max-time` deadline can end the run with exit 0 and no final answer, and refused or failed tool calls also leave exit 0. Exit 1 covers a final `error` or `aborted` stop reason and also launch failures (for example a missing `@file`) that never reach the model; check stderr when `assistant_messages` is 0. The summary's `looks_complete` is true only when the stream reached `agent_end` and the final assistant message stopped normally with text and no pending tool calls, so it is also true when the child declines the task ([troubleshooting](references/troubleshooting.md#a-refusal-that-looks-complete)); read the answer. Check `tool_errors` too, since a refused tool can make a "complete" answer rest on missing evidence. `write_targets` is a best-effort hint: it lists targets of successful `write`/`edit`/`ast_edit` calls (`agent://` entries are messages to omp's own subagents) but misses files changed through `bash`. For a review, `git status` before and after is the authority. `subagent_failures` counts subagents that aborted or failed, and a nonzero `background_jobs` (only possible with `--allow-async` or a direct launch) means checking that those jobs' results arrived before the run ended.
+Exit code 0 does not mean the task finished. A `--max-time` deadline can end the run with exit 0 and no final answer, and refused or failed tool calls also leave exit 0. Exit 1 covers a final `error` or `aborted` stop reason and also launch failures that never reach the model, such as a missing `@file` or a `--resume` whose workspace is gone. For those, `final_error` holds stderr's last line; the full text is in `stderr.txt`. The summary's `looks_complete` is true only when the stream reached `agent_end` and the final assistant message stopped normally with text and no pending tool calls, so it is also true when the child declines the task ([troubleshooting](references/troubleshooting.md#a-refusal-that-looks-complete)); read the answer. Check `tool_errors` too. Most are the child's own failed commands, such as a failing test or a missing path, and need no action. A refusal (`requires approval`) or a missing tool can leave a "complete" answer resting on evidence the child never got. `write_targets` is a best-effort hint: it lists targets of successful `write`/`edit`/`ast_edit` calls (`agent://` entries are messages to omp's own subagents) but misses files changed through `bash`. For a review, `git status` before and after is the authority. `subagent_failures` counts subagents that aborted or failed, and a nonzero `background_jobs` (only possible with `--allow-async` or a direct launch) means checking that those jobs' results arrived before the run ended.
 
 Treat the response as another agent's report, not proof of success. Check the requested evidence and any affected files or external state. For a review that should not change files, compare `git status` before and after. Distinguish a completed task from partial work, a refusal, a timeout, or an authentication failure. Do not re-run a potentially mutating request blindly after a failed or interrupted call; first inspect what it already changed.
 
 For empty responses, stalls, missing tools, or provider errors, read [troubleshooting.md](references/troubleshooting.md). That reference separates an observed historical Codex schema bug from general launch guidance; do not permanently disable capabilities based on an old workaround.
 
-Return the useful result, verification performed, the model and cost from the run summary (`primary_cost_usd` plus `subagent_cost_usd`; background-job and advisor spend appear only in `omp stats`), remaining blockers, the run directory, and the session ID if follow-up is expected. Never claim that headless capabilities exactly match an interactive session without comparing the effective setup.
+Return the useful result, the verification you performed, the model that answered (`models` in the summary), remaining blockers, the run directory, and the session ID if follow-up is expected. Leave cost out unless the user asks for it. The summary's figures are omp's estimates at list prices, not charges, and subscription providers bill by plan usage. The ledger, `report.sh`, and `omp stats` keep them for whoever needs them. Never claim that headless capabilities exactly match an interactive session without comparing the effective setup.

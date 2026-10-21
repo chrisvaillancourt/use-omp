@@ -24,6 +24,7 @@ def write_targets:
     is_event_stream: any($events[]; .type == "agent_start"),
     session_id: ([$events[] | select(.type == "session") | .id] | first),
     models: ($msgs | map("\(.provider)/\(.model)") | unique),
+    final_model: (if $final == null then null else "\($final.provider)/\($final.model)" end),
     assistant_messages: ($msgs | length),
     agent_end_seen: $agent_end_seen,
     final_stop_reason: $final.stopReason,

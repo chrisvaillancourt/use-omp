@@ -1,7 +1,8 @@
-{"started":"2026-10-12T10:00:00Z","duration_s":100,"label":"ok","workspace":"/w1","model":"p/a","exit":0,"looks_complete":true,"tool_errors":0,"primary_cost_usd":0.5,"subagent_cost_usd":0.25,"read_only":false}
+{"started":"2026-10-12T10:00:00Z","duration_s":100,"label":"ok","workspace":"/w1","model":"p/a","exit":0,"looks_complete":true,"tool_errors":3,"primary_cost_usd":0.5,"subagent_cost_usd":0.25,"read_only":false}
 {"started":"2026-10-13T10:00:00Z","duration_s":200,"label":"read-only review","workspace":"/w1","model":"p/a","exit":0,"looks_complete":true,"tool_errors":2,"approval_refusals":2,"primary_cost_usd":0.1,"read_only":true}
 {"started":"2026-10-13T11:00:00Z","duration_s":300,"label":"failed","workspace":"/w2","model":"p/b","exit":1,"looks_complete":false,"tool_errors":0,"primary_cost_usd":0.2}
 {"started":"2026-10-14T09:00:00Z","duration_s":400,"label":"background","workspace":"/w2","model":"p/b","exit":0,"looks_complete":true,"tool_errors":0,"background_jobs":1,"subagent_failures":0,"primary_cost_usd":0.1}
+{"started":"2026-10-15T09:00:00Z","duration_s":null,"label":"refused","workspace":"/w2","model":"p/b","exit":0,"looks_complete":true,"tool_errors":1,"approval_refusals":1,"primary_cost_usd":0.1,"read_only":false}
 {"started":"2026-10-20T09:00:00Z","duration_s":"oops","label":"bad fields","workspace":"/w1","model":null,"exit":0,"looks_complete":true,"tool_errors":"oops","primary_cost_usd":"oops"}
 not json
 {"started":"garbage","label":"bad date"}

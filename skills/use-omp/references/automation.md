@@ -14,22 +14,16 @@ Verify interface flags with the installed `omp --help`. Protocol fields can chan
 `scripts/run-omp.sh` keeps two records per run. Environment variables override both locations:
 
 - **Transcript:** `USE_OMP_SESSION_DIR`, default `<omp sessions root>/--agent-delegations--`. The sessions root is `~/.omp/agent/sessions` unless `PI_CODING_AGENT_DIR` moves it. With `OMP_PROFILE` set or an XDG layout, the wrapper's `omp` uses that profile, so set `USE_OMP_SESSION_DIR` to a folder inside that profile's sessions root. Because the folder sits inside the sessions root, `omp stats` reports it as its own folder (`byFolder` in `omp stats --json`), including nested subagent and advisor transcripts. `omp --export` and `omp gc` work on it as on any session. `omp gc --archive` moves cold sessions out of the sessions root, so older ledger `session_file` paths can go stale. The resume picker's default per-project list leaves these runs out, but its all-sessions view includes them. Print mode never generates session titles; the ledger's `label` names the run instead.
-- **Run directory and ledger:** `USE_OMP_STATE_DIR`, default `${XDG_STATE_HOME:-~/.local/state}/use-omp`. Each run gets `runs/<UTC time>-<label>.XXXX/` holding `prompt.md`, `events.jsonl`, `stderr.txt`, `exit.txt`, `summary.json`, `answer.md`, and `ledger-line.json`. The ledger is kept outside the sessions root so `omp stats` does not read it as a transcript.
+- **Run directory and ledger:** `USE_OMP_STATE_DIR`, default `${XDG_STATE_HOME:-~/.local/state}/use-omp`. Each run gets `runs/<UTC time>-<label>.XXXX/` holding `prompt.md`, `events.jsonl`, `stderr.txt`, `exit.txt`, `summary.json`, `answer.md`, `ledger-line.json`, and the wrapper's `omp-overlay.yml` (absent with both `--allow-async` and `--memory`). After omp exits, `events.jsonl` loses its progress-only events (`message_update`, `tool_execution_update`, `tool_stream_update`). They repeat partial tool output and made up most of a typical run's bytes. The ledger is kept outside the sessions root so `omp stats` does not read it as a transcript.
 
-Each `runs.jsonl` line has `started`, `duration_s`, `label`, `workspace`, `model`, `thinking`, `read_only`, `resumed_session`, `max_time`, `omp_version`, `exit`, `looks_complete`, `final_stop_reason`, `final_error`, `session_id`, `models`, `assistant_messages`, `tool_calls`, `tool_errors`, `approval_refusals` (tool errors from approval checks, expected under `--read-only`), `write_targets`, `subagent_tasks`, `background_jobs` (task and bash), `subagent_failures`, `subagent_cost_usd`, `retries`, `tokens`, `primary_cost_usd`, `async` (true only with `--allow-async`), `extra_configs` (overlays passed with `--config`), `caller` (`claude_session_id` from `CLAUDE_CODE_SESSION_ID` when set, and `cwd`), `run_dir`, and `session_file`. `--no-record` runs write neither record.
+Each `runs.jsonl` line has `started`, `duration_s`, `label`, `workspace`, `model` (the model of the final assistant message, else the selector passed), `model_requested` (`--model` or `USE_OMP_MODEL` as given, before bare-ID resolution), `model_source` (`flag`, `env`, or `omp-default`), `thinking`, `read_only`, `memory_off` (true when the wrapper's overlay turned memory off, that is without `--memory`; a later `--config` overlay can still turn it back on), `resumed_session`, `max_time`, `omp_version`, `exit`, `looks_complete`, `final_stop_reason`, `final_error` (for a launch failure with no events, stderr's last line), `session_id`, `models`, `assistant_messages`, `tool_calls`, `tool_errors`, `approval_refusals` (tool errors from approval checks, expected under `--read-only`), `write_targets`, `subagent_tasks`, `background_jobs` (task and bash), `subagent_failures`, `subagent_cost_usd`, `retries`, `tokens`, `primary_cost_usd` (costs are omp's list-price estimates, not charges), `async` (true only with `--allow-async`), `extra_configs` (overlays passed with `--config`), `caller` (`claude_session_id` from `CLAUDE_CODE_SESSION_ID` when set, and `cwd`), `run_dir`, and `session_file`. `--no-record` runs write neither record.
 
-To keep a run out of omp's memory (an independent review, a test), pass an overlay:
-
-```sh
-overlay_dir=$(mktemp -d "${TMPDIR:-/tmp}/omp-overlay.XXXXXX")
-printf 'memory:\n  backend: off\n' > "$overlay_dir/no-memory.yml"
-bash "$skill_dir/scripts/run-omp.sh" ... --config "$overlay_dir/no-memory.yml"
-```
+The wrapper's overlay turns omp's memory off for each run, so a run neither reads nor adds to a memory bank. `--memory` keeps the user's setting. Overlays passed with `--config` merge after the wrapper's, in order, and the later value wins.
 
 Read the metrics with:
 
 ```sh
-bash "$skill_dir/scripts/report.sh" [--since 2026-10-01] [--json]   # completion, failures, duration, primary cost
+bash "$skill_dir/scripts/report.sh" [--since 2026-10-01] [--json]   # completion, failures, refusals, duration, est. cost
 omp stats --summary                                             # tokens, latency, cost incl. subagents, per folder
 ```
 
@@ -44,8 +38,9 @@ Set `workspace`, `model`, and literal task text `prompt` first, then launch with
 ```sh
 session_dir=$(mktemp -d "${TMPDIR:-/tmp}/omp-session.XXXXXX")
 run_dir=$(mktemp -d "${TMPDIR:-/tmp}/omp-run.XXXXXX")
-# Subagents and long bash commands finish before exit instead of becoming cancelled background jobs:
-printf 'async:\n  enabled: false\nbash:\n  autoBackground:\n    enabled: false\n' > "$run_dir/omp-overlay.yml"
+# Subagents and long bash commands finish before exit instead of becoming cancelled background jobs, and
+# memory is off so the run is independent of earlier ones (drop the memory lines to keep the user's setting):
+printf 'async:\n  enabled: false\nbash:\n  autoBackground:\n    enabled: false\nmemory:\n  backend: off\n' > "$run_dir/omp-overlay.yml"
 omp -p --cwd "$workspace" --model "$model" --session-dir "$session_dir" \
   --config "$run_dir/omp-overlay.yml" --mode json --max-time 30m -- "$prompt" \
   < /dev/null > "$run_dir/events.jsonl" 2> "$run_dir/stderr.txt"
@@ -62,13 +57,13 @@ Capture stdout and stderr separately and retain the process exit code. Store tra
 
 The first line is a `session` header (`version`, `id`, `cwd`, `timestamp`). Events that matter to a caller (omp 18.12.3):
 
-- `message_update`: incremental deltas only, with no message snapshot. Not an authoritative message.
+- `message_update`: incremental deltas only, with no message snapshot. Not an authoritative message. `tool_execution_update` and `tool_stream_update` are the tool-side equivalents. `run-omp.sh` drops all three from its saved file after omp exits.
 - `message_end`: complete message. For `message.role == "assistant"`, it carries `content[]` (`text`, `thinking`, and `toolCall` blocks), `provider`, `model`, `stopReason`, optional `errorMessage`, and `usage` (`input`, `output`, `cacheRead`, `cacheWrite`, `totalTokens`, `cost.total`).
 - `tool_execution_start`: `toolCallId`, `toolName`, `args`. `tool_execution_end`: `toolName`, `result`, `isError`.
 - `auto_retry_*`, `retry_fallback_*`, `auto_compaction_*`: retries, provider fallbacks, and compaction.
 - `agent_end`: end-of-agent data. It has no aggregate cost, and it is not a substitute for process completion or checking errors.
 
-`scripts/summarize-events.jq` (in this skill's directory, `skill_dir`) reduces a captured file to the session ID, models used, final stop reason and error, final text length, tool calls by name, tool errors, best-effort write targets (successful `write`/`edit`/`ast_edit` calls only; `bash` writes are not visible), subagent task count, background jobs started (with their types), subagent failures, retries, tokens, primary-agent and inline-subagent cost, and a `looks_complete` verdict:
+`scripts/summarize-events.jq` (in this skill's directory, `skill_dir`) reduces a captured file to the session ID, models used (sorted) and the final message's model (`final_model`), final stop reason and error, final text length, tool calls by name, tool errors, best-effort write targets (successful `write`/`edit`/`ast_edit` calls only; `bash` writes are not visible), subagent task count, background jobs started (with their types), subagent failures, retries, tokens, primary-agent and inline-subagent cost, and a `looks_complete` verdict:
 
 ```sh
 jq -s -f "$skill_dir/scripts/summarize-events.jq" "$run_dir/events.jsonl"
