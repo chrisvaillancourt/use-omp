@@ -32,7 +32,7 @@ Fix: start a fresh run and give it the previous run's `answer.md` as context. To
 
 - `File not found` for a prompt attachment: a relative `@prompt.md` resolves against `--cwd`, not the caller's directory. Use an absolute path.
 - `Cannot index array with string ("selector")` from `omp models --json | jq '.[].selector'`: the output is an object with a `models` array; use `.models[].selector`.
-- Exit 127 from `timeout`: macOS has no GNU `timeout`. Use `--max-time` and the host's background-job control.
+- Exit 127 from `timeout`: GNU `timeout` is not installed on that host (stock macOS lacks it). Check `command -v timeout` and the full error first, since some machines install it from coreutils. Either way, rely on `--max-time` and the host's background-job control.
 
 ## Missing capabilities or a different environment
 

@@ -33,7 +33,7 @@ The records hold prompts, source code, and tool output, as the user's own sessio
 
 Use this when the host cannot run `run-omp.sh`. For a fresh, resumable task, create a private session directory outside the source tree and retain its path. An explicit `--session-dir` without `--resume` or `--continue` creates a new session even if `autoResume` is enabled. This isolates conversation storage without changing the workspace's capabilities or credentials.
 
-Set `workspace`, `model`, and literal task text `prompt` first, then launch with the intended profile/configuration:
+Set `workspace`, `model`, and literal task text `prompt` first, then launch with the intended profile/configuration. Where the host checks commands against an allowlist, as Claude Code does, substitute literal paths for the variables and `$(mktemp …)` calls (create the directories in a separate step first):
 
 ```sh
 session_dir=$(mktemp -d "${TMPDIR:-/tmp}/omp-session.XXXXXX")
@@ -126,7 +126,7 @@ Do not run concurrent writers against the same session. Use separate sessions an
 
 ## Deadlines and cancellation
 
-Set the outer process timeout longer than omp's `--max-time`. The deadline is set after stdin is read, during session setup, and it aborts the agent loop. It does not cover time spent waiting for stdin, and it is not a spending cap. If the host limits a foreground command's duration (for example to 10 minutes), run omp as a background job the host tracks and wait for its completion notice. macOS has no GNU `timeout`; rely on `--max-time` plus the host's job control.
+Set the outer process timeout longer than omp's `--max-time`. The deadline is set after stdin is read, during session setup, and it aborts the agent loop. It does not cover time spent waiting for stdin, and it is not a spending cap. If the host limits a foreground command's duration (for example to 10 minutes), run omp as a background job the host tracks and wait for its completion notice. Stock macOS has no GNU `timeout`; where it is installed it can add an outer limit, but rely on `--max-time` plus the host's job control. A caller the host does not wake on job completion should block on `exit.txt` with a waiter that has its own timeout, as SKILL.md section 3 describes.
 
 On cancellation, stop the owned process using the caller's process-management interface, wait for exit, and inspect partial results. Do not start a duplicate request while the original may still be running. Child tools can create external jobs or side effects; killing omp does not prove that those jobs were cancelled or changes rolled back.
 
