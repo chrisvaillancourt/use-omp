@@ -28,6 +28,10 @@ Fix: `run-omp.sh` follows the file with a typed line that names it as the task; 
 
 Fix: start a fresh run and give it the previous run's `answer.md` as context. To avoid it, keep one worktree per review across rounds and move it to each new commit (`git -C <path> checkout --detach <commit>`, then bootstrap again), removing it only after the last follow-up.
 
+## An answer from the wrong run
+
+Run directories are named `<UTC timestamp>-<label slug>.XXXX` under the state directory. A glob on part of a label, such as `ls -td runs/*review*`, can match an earlier run whose label shares those words, and reading its `answer.md` returns the wrong result with no error. Observed 2026-10-30: a glob for a new review picked up a run from ten days earlier. Read the `run_dir` the wrapper prints to stderr at start, or the `run_dir` field of the summary it prints, instead of searching. If you must search, match the timestamp prefix as well as the slug.
+
 ## Launch errors
 
 - `File not found` for a prompt attachment: a relative `@prompt.md` resolves against `--cwd`, not the caller's directory. Use an absolute path.
