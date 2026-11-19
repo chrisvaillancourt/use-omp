@@ -39,7 +39,10 @@ Set `workspace`, `model`, and literal task text `prompt` first, then launch with
 session_dir=$(mktemp -d "${TMPDIR:-/tmp}/omp-session.XXXXXX")
 run_dir=$(mktemp -d "${TMPDIR:-/tmp}/omp-run.XXXXXX")
 # Subagents and long bash commands finish before exit instead of becoming cancelled background jobs, and
-# memory is off so the run is independent of earlier ones (drop the memory lines to keep the user's setting):
+# memory is off so the run is independent of earlier ones (drop the memory lines to keep the user's setting).
+# To keep background jobs instead, drop the async and bash lines and add --wait-async to the omp command.
+# A user config with async.printWake: true waits without the flag. The overlay does not cover eval's own
+# auto-backgrounding, which is off by default.
 printf 'async:\n  enabled: false\nbash:\n  autoBackground:\n    enabled: false\nmemory:\n  backend: off\n' > "$run_dir/omp-overlay.yml"
 omp -p --cwd "$workspace" --model "$model" --session-dir "$session_dir" \
   --config "$run_dir/omp-overlay.yml" --mode json --max-time 30m -- "$prompt" \
@@ -55,21 +58,21 @@ Capture stdout and stderr separately and retain the process exit code. Store tra
 
 ## Read the event stream
 
-The first line is a `session` header (`version`, `id`, `cwd`, `timestamp`). Events that matter to a caller (omp 18.12.3):
+The first line is a `session` header (`version`, `id`, `cwd`, `timestamp`). Events that matter to a caller (omp 18.22.2):
 
 - `message_update`: incremental deltas only, with no message snapshot. Not an authoritative message. `tool_execution_update` and `tool_stream_update` are the tool-side equivalents. `run-omp.sh` drops all three from its saved file after omp exits.
 - `message_end`: complete message. For `message.role == "assistant"`, it carries `content[]` (`text`, `thinking`, and `toolCall` blocks), `provider`, `model`, `stopReason`, optional `errorMessage`, and `usage` (`input`, `output`, `cacheRead`, `cacheWrite`, `totalTokens`, `cost.total`).
 - `tool_execution_start`: `toolCallId`, `toolName`, `args`. `tool_execution_end`: `toolName`, `result`, `isError`.
 - `auto_retry_*`, `retry_fallback_*`, `auto_compaction_*`: retries, provider fallbacks, and compaction.
-- `agent_end`: end-of-agent data. It has no aggregate cost, and it is not a substitute for process completion or checking errors.
+- `agent_end`: one per stopped model loop. `isTerminal: true` ends the run; `isTerminal: false` marks a loop the run continues after (`yielded: false` for omp's own continuation such as a retry, `awaitingAsyncWork: true` when only a background job or child agent can resume it). Print mode without `--wait-async` exits on an `awaitingAsyncWork` end and cancels those jobs. It has no aggregate cost, and it is not a substitute for process completion or checking errors.
 
-`scripts/summarize-events.jq` (in this skill's directory, `skill_dir`) reduces a captured file to the session ID, models used (sorted) and the final message's model (`final_model`), final stop reason and error, final text length, tool calls by name, tool errors, best-effort write targets (successful `write`/`edit`/`ast_edit` calls only; `bash` writes are not visible), subagent task count, background jobs started (with their types), subagent failures, retries, tokens, primary-agent and inline-subagent cost, and a `looks_complete` verdict:
+`scripts/summarize-events.jq` (in this skill's directory, `skill_dir`) reduces a captured file to the session ID, models used (sorted) and the final message's model (`final_model`), final stop reason and error, final text length, the number of answer messages (`answer_messages`, the messages `answer.md` joins), tool calls by name, tool errors, best-effort write targets (successful `write`/`edit`/`ast_edit` calls only; `bash` writes are not visible), subagent task count, background jobs started (with their types), subagent failures, retries, tokens, primary-agent and inline-subagent cost, and a `looks_complete` verdict:
 
 ```sh
 jq -s -f "$skill_dir/scripts/summarize-events.jq" "$run_dir/events.jsonl"
 ```
 
-`-s` loads the whole file into memory, which suits typical runs. A truncated last line makes jq fail; treat that as an incomplete run, not as an empty result. A stream cut at a line boundary still parses but shows `agent_end_seen: false`. `is_event_stream: false` means the file is not print-mode output (a session transcript uses different record types) or the run failed before the agent started; check stderr and `exit.txt`.
+`-s` loads the whole file into memory, which suits typical runs. A truncated last line makes jq fail; treat that as an incomplete run, not as an empty result. A stream cut at a line boundary still parses but shows `agent_end_seen: false`, which counts only a terminal `agent_end`. `is_event_stream: false` means the file is not print-mode output (a session transcript uses different record types) or the run failed before the agent started; check stderr and `exit.txt`.
 
 `primary_cost_usd` covers the primary agent. `subagent_cost_usd` adds the direct subagents that returned inline, which is every direct subagent under the wrapper's default overlay; the task tool's result carries each one's `usage`. Nested subagents (a subagent's own subagents), background subagents, and the advisor report their spend in their own transcripts; `omp stats` totals them from the saved transcripts. Compare against the provider's usage view when the bill matters.
 
@@ -79,13 +82,13 @@ Extract only the session ID:
 jq -r 'select(.type == "session") | .id' "$run_dir/events.jsonl"
 ```
 
-Print the text of the final assistant message:
+Print the answer exactly as `run-omp.sh` writes it to `answer.md`: every message in which the model ended its turn normally (`stop`, not `pause_turn`, no tool call left), with narration blocks as text, in order and separated by a blank line; with none, the last message's text. A run can end with a short addendum after the message that holds the verdict, so the last message alone is not enough:
 
 ```sh
-jq -rs '[.[] | select(.type == "message_end" and .message.role == "assistant") | .message] | last | .content[]? | select(.type == "text") | .text' "$run_dir/events.jsonl"
+jq -rs --arg output answer -f "$skill_dir/scripts/summarize-events.jq" "$run_dir/events.jsonl"
 ```
 
-Earlier assistant messages hold intermediate commentary. Print every assistant message's text:
+Messages that stopped for a tool call hold intermediate commentary. Print every assistant message's text:
 
 ```sh
 jq -r 'select(.type == "message_end" and .message.role == "assistant") | .message.content[]? | select(.type == "text") | .text' "$run_dir/events.jsonl"
@@ -93,13 +96,13 @@ jq -r 'select(.type == "message_end" and .message.role == "assistant") | .messag
 
 ## Exit status and completion
 
-In both text and JSON print modes (18.12.3), exit 1 means the last assistant message ended with `stopReason` `error` or `aborted`, a strict MCP startup failure, a session-store durability failure, or a launch failure before the model is called (for example `Error: File not found` for a missing `@file`). Usage errors exit 2. Signals exit 130, 143, or 129. Everything else exits 0, including:
+In both text and JSON print modes (18.22.2, `modes/print-mode.ts`), exit 1 means the last assistant message ended with `stopReason` `error` or `aborted`, a strict MCP startup failure, a session-store durability failure, a launch failure before the model is called (for example `Error: File not found` for a missing `@file`), a built-in slash command that failed, or, with `--wait-async`, `--max-time` reached before the run ended (`Error: --max-time reached before the run ended; any running jobs were cancelled.`). That last one can fire while omp waits on a retry backoff, not only on a running job. Silent aborts and signal teardowns are not ordinary failures. Exit 3 means the cost cap (`--max-cost` or `session.maxCost`) stopped the run. Usage errors exit 2. Signals exit 130, 143, or 129. Everything else exits 0, including:
 
 - A `--max-time` deadline that expires between turns or before the first answer. A 1-second deadline exited 0 with no assistant message. A deadline that interrupts a model turn records `aborted` and exits 1.
 - `stopReason` `length`, unless omp's length-stop recovery gives up. Since 18.12.3, print mode waits for that recovery to settle, so a run that ends with `Length-stop recovery gave up …` exits 1. In JSON mode that error arrives as a `notice` event (`level` `error`), and the last `message_end` can still show `length`.
 - Tool calls refused for lack of approval, or that failed for any other reason.
 
-So check the final message, not the exit code: complete means the stream reached `agent_end` and the final assistant message has `stopReason` `stop`, non-empty text, no `toolCall` blocks, and no `stopDetails.type` of `pause_turn`. omp keeps working after a `stop` that carries tool calls or a `pause_turn`. A `toolUse` message is not a final answer. Even a normal stop does not establish that the requested task succeeded; inspect the result.
+So check the final message, not the exit code: complete means the stream reached a terminal `agent_end` (not `isTerminal: false`) and the final assistant message has `stopReason` `stop`, non-empty text, no `toolCall` blocks, and no `stopDetails.type` of `pause_turn`. omp keeps working after a `stop` that carries tool calls or a `pause_turn`. A `toolUse` message is not a final answer. Even a normal stop does not establish that the requested task succeeded; inspect the result.
 
 ## Inspect a run after the fact
 

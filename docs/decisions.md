@@ -1,6 +1,6 @@
 # Design decisions
 
-Each entry records what was decided, why, the evidence, and when to revisit it. Evidence and experiments are described in [the 2026-10-13 audit](2026-10-13-audit.md). Behavior claims were verified against omp 18.10.3 unless noted, and rechecked against the 18.10.4 and 18.12.3 source diffs and live tiers.
+Each entry records what was decided, why, the evidence, and when to revisit it. Evidence and experiments are described in [the 2026-10-13 audit](2026-10-13-audit.md). Behavior claims were verified against omp 18.10.3 unless noted, and rechecked against the 18.10.4 and 18.12.3 source diffs, the 18.22.2 source, and live tiers.
 
 ## 1. JSON event mode is the default launch
 
@@ -12,9 +12,11 @@ Each entry records what was decided, why, the evidence, and when to revisit it. 
 
 ## 2. Completion is judged by the final message, not the exit code
 
-**Decision:** A run is complete only when the stream reached `agent_end` and the final assistant message has `stopReason: "stop"`, non-empty text, no pending `toolCall` blocks, and no `pause_turn`. `summarize-events.jq` reports this as `looks_complete`. Agents also check `tool_errors`, `subagent_failures`, and `background_jobs`.
+**Decision:** A run is complete only when the stream reached a terminal `agent_end` (not `isTerminal: false`) and the final assistant message has `stopReason: "stop"`, non-empty text, no pending `toolCall` blocks, and no `pause_turn`. `summarize-events.jq` reports this as `looks_complete`. Agents also check `tool_errors`, `subagent_failures`, and `background_jobs`.
 
-**Why:** omp exits 1 only for a final `error`/`aborted` stop reason, strict MCP startup failure, session-store durability failure, or a launch failure. It exits 0 for a deadline that lands before the first answer (a 1-second probe exited 0 with no assistant message), for `length` stops (since 18.12.3, not when its length-stop recovery gives up), for refused or failed tool calls, and for runs whose background subagents were cancelled. omp continues after a `stop` that carries tool calls or a `pause_turn`, so those are not final.
+**Why:** omp's exit 1 covers a final `error`/`aborted` stop reason, a strict MCP startup failure, a session-store durability failure, a launch failure, and a few rarer cases ([automation.md](../skills/use-omp/references/automation.md#exit-status-and-completion) has the full list). It exits 0 for a deadline that lands before the first answer (a 1-second probe exited 0 with no assistant message), for `length` stops (since 18.12.3, not when its length-stop recovery gives up), for refused or failed tool calls, and for runs whose background subagents were cancelled. omp continues after a `stop` that carries tool calls or a `pause_turn`, so those are not final. Exit 3 (omp 18.22.2) means the cost cap stopped the run.
+
+**Update (2026-11-18): only a terminal `agent_end` counts.** The JSON stream sends an `agent_end` for every stopped model loop and flags one the run continues after with `isTerminal: false`. A run whose print mode exits while it awaits a background job ends on such an event, after a final-looking `stop`; the recorded background-job fixture from 18.10.3 has exactly this shape, and the old check called it complete. omp brackets every loop with `agent_start` and `agent_end` (the recorded multi-loop runs have equal counts of each), so the check reads the last loop: its `agent_end` must be terminal and its last assistant message is the final one. A terminal end or an answer from an earlier loop cannot complete a later one. `answer.md` still collects answer messages from every loop, since a verdict can come before a wake or retry. Rechecked against recent recorded runs, the change altered no verdict (the few that ended on a non-terminal `agent_end` had already failed).
 
 ## 3. A wrapper script instead of a hand-assembled recipe
 
@@ -74,6 +76,8 @@ Each entry records what was decided, why, the evidence, and when to revisit it. 
 **Why not change the global settings:** in the TUI, background jobs let the primary agent keep working while subagents and long commands run, and the TUI waits for them. The loss happens only in print mode.
 
 **Revisit if:** omp's print mode starts waiting for background work (the TUI's settle loop in `event-controller.ts` has no print-mode counterpart from 18.10.3 through 18.12.3), or either setting ID is renamed. The offline tests check that both IDs still exist.
+
+**Update (2026-11-18): the revisit trigger fired, and the default stays for now.** omp 18.22.2 has an opt-in `--wait-async` (`async.printWake`): print mode waits for the run's background jobs, wakes the session with each result, and stops at `--max-time`. `--allow-async` now passes it, so a caller who keeps background jobs no longer loses them; a live probe confirmed a 45-second background subagent finished and reached the answer. Switching the default to `--wait-async` would let the child keep working while subagents and long commands run. It would not lift bash's 300-second default timeout: a backgrounded command keeps the timeout it started with (`tools/bash.ts:1589-1595`, `1645-1655`), so a long command still needs an explicit `timeout`. It would also lose inline subagent cost from the summary and make runs end over several loops. Recorded delegations have not used `--allow-async`, so there is no evidence yet that waiting beats blocking on typical delegations; compare elapsed time and outcomes on tasks with independent work before switching. That is a change to this decision, so it waits for the user's call; the offline tests check that `async.printWake` exists.
 
 ## 7. Preserve the user's omp configuration otherwise
 
@@ -159,4 +163,16 @@ Every live probe runs with memory off, which is now the wrapper's default (decis
 
 **Decision:** `report.sh` counts runs with tool errors but no longer lists them as problems. It lists runs that did not complete, exited nonzero, had approval refusals outside `--read-only`, had subagent failures, or left background jobs. SKILL.md tells agents that most tool errors are the child's own failed commands.
 
+**Update (2026-11-18):** background jobs count as a problem only in runs that did not wait for them. With `--allow-async` (ledger `async: true`) the wrapper passes `--wait-async`, so a job started is expected; a job left behind shows up as an incomplete run.
+
 **Why:** about half of the recorded runs had tool errors, and a sample showed nearly all were ordinary: a test or command exiting 1, a path that did not exist, a script traceback. Listing them buried the real problems: the most recent "problems" were all of this kind, while a failed launch and a run whose subagents failed were easy to miss.
+
+## 17. `answer.md` holds every answer message
+
+**Decision (2026-11-18):** `run-omp.sh` writes to `answer.md` the text of every answer message, in order, separated by a blank line. An answer message stopped normally (`stopReason: "stop"`, not `pause_turn`) with no tool call left to run and with answer text. Answer text is the text blocks plus thinking blocks marked `narration`, which omp's text mode shows as answer text. Narration between tool calls and text from `aborted`, `length`, or `error` attempts that a retry replaced stay out. With no answer message (a run cut off mid-tool), it falls back to the last message's text, as before. `summarize-events.jq --arg output answer` holds the one definition; the wrapper calls it, and the summary's `answer_messages` counts the same messages. `final_text_chars` still measures the last one.
+
+**Review (2026-11-18):** the first version took every message that was not a tool-use stop. An omp reviewer showed that a text-bearing `aborted`, `length`, `error`, or `pause_turn` message before a recovered answer then appeared in `answer.md` as if it were part of the answer, and that narration-only answers were judged empty.
+
+**Why:** `answer.md` held only the last assistant message. In a few recorded runs, a reviewer ended with a short addendum after the message that held its verdict, so `answer.md` was one line ("Verdict unchanged") while `looks_complete` was true, and the verdict was only in `events.jsonl`. One caller noticed and wrote its own extractor; another nearly took the addendum for the verdict. On those runs the new rule writes the verdict followed by the addendum. "Every turn-ending message" was chosen over "the longest message", which is a guess: a long interim summary could beat a short, correct verdict.
+
+**Revisit if:** callers find answers padded with messages they do not want, or omp marks the final answer explicitly in the event stream.

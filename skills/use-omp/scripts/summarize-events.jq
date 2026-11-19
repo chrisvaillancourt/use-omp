@@ -1,10 +1,20 @@
-# Summarize an omp `--mode json` event file (verified against omp 18.12.3).
-# Usage: jq -s -f summarize-events.jq events.jsonl
+# Summarize an omp `--mode json` event file (verified against omp 18.22.2).
+# Usage: jq -s -f summarize-events.jq events.jsonl                     # the summary, as JSON
+#        jq -rs --arg output answer -f summarize-events.jq events.jsonl  # the answer text, as run-omp.sh writes answer.md
 # A truncated final line makes jq fail; a stream cut at a line boundary shows agent_end_seen: false.
 # primary_cost_usd covers the primary agent. subagent_cost_usd adds direct subagents that returned inline
 # (async off); nested and background subagents and the advisor report their spend elsewhere.
 def text_of: [.content[]? | select(.type == "text") | .text // ""] | add // "";
 def assistant: select(.type == "message_end" and .message.role? == "assistant") | .message;
+# What a user sees as a message's answer: its text blocks, plus thinking blocks marked `narration`, which
+# omp's text mode shows as answer text (pi-ai `presentNarrationAsAnswer`). Other thinking stays out.
+def answer_text: [.content[]? | if .type == "text" then .text // ""
+  elif .type == "thinking" and .narration == true then .thinking // "" else empty end | select(length > 0)] | join("\n");
+# An answer message: the model ended its turn normally (`stop`, not `pause_turn`) with no tool call left to
+# run and with answer text. A run can hold several (an answer, then a short addendum), and all of them are
+# the answer; text from an `aborted`, `length`, or `error` attempt that a retry replaced is not.
+def answer_message: .stopReason == "stop" and (.stopDetails.type? != "pause_turn")
+  and ([.content[]? | select(.type == "toolCall")] | length) == 0 and (answer_text | length) > 0;
 # Best-effort targets of a write/edit/ast_edit call: `path`, `paths` (may be globs or directories),
 # or the file headers inside a patch-style `input` (hashline `[path#TAG]`, apply_patch `*** ... File: path`).
 def write_targets:
@@ -17,10 +27,20 @@ def write_targets:
 [.[] | objects | select((.type | type) == "string")] as $events
 | [$events[] | select(.type == "tool_execution_end" and .isError == true) | .toolCallId] as $failed
 | [$events[] | assistant] as $msgs
-| ($msgs | last) as $final
-| ($final // {} | text_of) as $final_text
-| any($events[]; .type == "agent_end") as $agent_end_seen
-| {
+| [$msgs[] | select(answer_message) | answer_text] as $answers
+# The JSON stream brackets every model loop with agent_start and agent_end; `isTerminal: false` marks a loop
+# the run continues after (a retry, a reminder, a background job's result). Print mode without --wait-async
+# exits on such an end and cancels the jobs it awaited (`awaitingAsyncWork`), so the last loop's agent_end
+# must be terminal, and the final message is the last loop's. A stream without the flag is treated as terminal.
+| ([$events | to_entries[] | select(.value.type == "agent_start") | .key] | last // -1) as $last_start
+| ([$events[($last_start + 1):][] | select(.type == "agent_end")] | last) as $last_end
+| ($last_end != null and $last_end.isTerminal != false) as $agent_end_seen
+| ([$events[($last_start + 1):][] | assistant] | last) as $final
+| ($final // {} | answer_text) as $final_text
+| if $ARGS.named.output == "answer" then
+    # Every answer message, in order; with none (a run cut off mid-tool), the last message's text.
+    (if ($answers | length) > 0 then $answers | join("\n\n") else ($msgs | last // {} | answer_text) end)
+  else {
     is_event_stream: any($events[]; .type == "agent_start"),
     session_id: ([$events[] | select(.type == "session") | .id] | first),
     models: ($msgs | map("\(.provider)/\(.model)") | unique),
@@ -30,6 +50,7 @@ def write_targets:
     final_stop_reason: $final.stopReason,
     final_error: $final.errorMessage,
     final_text_chars: ($final_text | length),
+    answer_messages: ($answers | length),
     tool_calls: ([$events[] | select(.type == "tool_execution_start") | .toolName]
       | group_by(.) | map({key: .[0], value: length}) | from_entries),
     tool_errors: [$events[] | select(.type == "tool_execution_end" and .isError == true)
@@ -61,3 +82,4 @@ def write_targets:
       and ([$final.content[]? | select(.type == "toolCall")] | length) == 0
       and ($final_text | length) > 0)
   }
+  end

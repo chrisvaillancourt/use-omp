@@ -38,13 +38,32 @@ expect approval '.looks_complete and ([.tool_errors[] | select(.error | test("re
   "a refused bash call under always-ask shows in tool_errors while the run looks complete"
 expect subagent '.subagent_tasks >= 1 and .background_jobs == 0 and .subagent_failures == 0 and .subagent_cost_usd > 0' \
   "an inline subagent (async off) reports its cost and no background jobs"
-expect background-job '.background_jobs == 1 and .background_job_types.task == 1 and .looks_complete' \
-  "a background subagent is counted even though the run looks complete"
+expect background-job '.background_jobs == 1 and .background_job_types.task == 1 and .looks_complete == false' \
+  "a background subagent is counted, and a run that ended on a non-terminal agent_end awaiting it is not complete"
 expect bash-background '.background_jobs == 1 and .background_job_types.bash == 1' \
   "a backgrounded bash command is counted"
 expect edge-stop-with-toolcall '.looks_complete == false' "a stop that still carries a tool call is not final"
 expect edge-pause-turn '.looks_complete == false' "a pause_turn stop is not final"
 expect edge-no-agent-end '.looks_complete == false and .agent_end_seen == false' "a stream without agent_end is not complete"
+expect edge-nonterminal-end '.looks_complete == false and .agent_end_seen == false' \
+  "a stream that stops after a non-terminal agent_end (isTerminal false: the run was still going) is not complete"
+expect edge-answer-addendum '.looks_complete and .answer_messages == 2 and .final_text_chars == 31' \
+  "a run whose answer ends with an addendum counts both turn-ending messages, not the tool-use narration"
+expect edge-answer-recovered '.looks_complete and .answer_messages == 1' \
+  "text from aborted, length, and pause_turn messages before a recovered answer is not counted as answer"
+expect edge-second-run '.looks_complete == false' \
+  "a terminal agent_end from an earlier run in the same stream does not complete the last run"
+expect edge-narration '.looks_complete and .answer_messages == 1' \
+  "a narration block (shown as answer text in text mode) counts as the answer"
+expect edge-empty-blocks '.looks_complete == false and .answer_messages == 0 and .final_text_chars == 0' \
+  "a stop whose text blocks are all empty is not an answer"
+expect edge-last-loop-empty '.looks_complete == false and .final_model == null' \
+  "a last loop with no assistant message does not borrow an earlier loop's answer for completion"
+answer_of() { jq -rs --arg output answer -f "$skill/scripts/summarize-events.jq" "$fixtures/events/$1.jsonl"; }
+check "--arg output answer prints only the recovered answer, not earlier partial attempts" \
+  '[ "$(answer_of edge-answer-recovered)" = "Final answer after the retry." ]'
+check "--arg output answer prints narration as answer text and leaves private thinking out" \
+  '[ "$(answer_of edge-narration)" = "Narrated answer shown to the user." ]'
 expect edge-empty-text '.looks_complete == false' "an empty final answer is not complete"
 expect edge-odd-records '.looks_complete' "non-object and untyped records are ignored, not fatal"
 expect edge-edits '.write_targets == ["?", "agent://Helper", "lib/b.py", "lib/c.py", "src/**/*.ts", "src/a.ts"]' \
@@ -82,6 +101,12 @@ check "problems list failures, background jobs, and unexpected refusals, oldest 
 check "--since filters by UTC date" '[ "$(report --since 2026-10-14 --json | jq .overall.runs)" = 3 ]'
 check "--since rejects a non-date with exit 2" 'report --since --json > /dev/null 2>&1; [ $? = 2 ]'
 check "the text report renders" 'report | grep -q "^  overall: 6 runs"'
+mkdir -p "$work/async-ledger"
+jq -cn '{started: "2026-11-18T00:00:00Z", label: "waited", model: "p/m", exit: 0, looks_complete: true, async: true, background_jobs: 2},
+  {started: "2026-11-18T00:01:00Z", label: "not waited", model: "p/m", exit: 0, looks_complete: true, async: false, background_jobs: 1}' \
+  > "$work/async-ledger/runs.jsonl"
+check "background jobs in a run that waited for them (--allow-async) are not a problem; elsewhere they are" \
+  '[ "$(USE_OMP_STATE_DIR="$work/async-ledger" bash "$skill/scripts/report.sh" --json | jq -c "[.recent_problems[].label]")" = "[\"not waited\"]" ]'
 
 echo "== run-omp.sh with a stub omp"
 stub="$work/stub-bin"; mkdir -p "$stub"
@@ -105,6 +130,13 @@ esac
 # STUB_FAIL: fail at launch with this error and no events, then a hint line, as omp does for a bad --resume.
 [ -n "${STUB_FAIL:-}" ] && { echo "$STUB_FAIL" >&2; echo "Run omp --resume without an argument to pick a session." >&2; exit 1; }
 [ -n "${STUB_SLEEP:-}" ] && { trap 'exit 143' TERM; sleep "$STUB_SLEEP" & wait $!; }
+# STUB_EVENTS names an event file to print instead of the default stream; STUB_STDERR and STUB_EXIT add a
+# stderr line and an exit code after it.
+if [ -n "${STUB_EVENTS:-}" ]; then
+  cat "$STUB_EVENTS"
+  [ -n "${STUB_STDERR:-}" ] && echo "$STUB_STDERR" >&2
+  exit "${STUB_EXIT:-0}"
+fi
 # STUB_STREAM adds the progress-only events a real run streams.
 [ -n "${STUB_STREAM:-}" ] && jq -cn '{type: "message_update", delta: "o"}, {type: "tool_execution_update", partial: "x"},
   {type: "tool_stream_update", chunk: "y"}'
@@ -150,8 +182,10 @@ check "record files are private" '[ "$(ls -l "$stub_state/runs.jsonl" | cut -c1-
 stub_run --label "stub read-only" --read-only > /dev/null 2>&1
 check "--read-only adds --approval-mode always-ask" 'grep -qx "arg=always-ask" "$work/stub.log"'
 stub_run --label "stub allow-async" --allow-async > /dev/null 2>&1
-check "--allow-async leaves omp's background-job settings alone and still turns memory off" \
-  '[ "$(cat "$(overlay_file)")" = "$memory_overlay" ]'
+check "--allow-async leaves omp's background-job settings alone, waits for the jobs (--wait-async), and still turns memory off" \
+  '[ "$(cat "$(overlay_file)")" = "$memory_overlay" ] && grep -qx "arg=--wait-async" "$work/stub.log"'
+check "without --allow-async the wrapper does not pass --wait-async" \
+  'stub_run --label "stub no async" > /dev/null 2>&1; ! grep -qx "arg=--wait-async" "$work/stub.log"'
 stub_run --label "stub memory" --memory > /dev/null 2>&1
 check "--memory leaves omp's memory setting alone" \
   '[ "$(cat "$(overlay_file)")" = "$async_overlay" ] && jq -e "select(.label == \"stub memory\") | .memory_off == false" "$stub_state/runs.jsonl" > /dev/null'
@@ -188,6 +222,19 @@ STUB_STREAM=1 stub_run --label "stub stream" > "$work/stream.summary.json" 2> /d
 check "progress-only events are dropped from the saved events file; the rest stay" \
   'f="$(jq -r .run_dir "$work/stream.summary.json")/events.jsonl"; ! grep -qE "\"type\":\"(message_update|tool_execution_update|tool_stream_update)\"" "$f" \
    && grep -q "\"type\":\"message_end\"" "$f" && jq -e .looks_complete "$work/stream.summary.json" > /dev/null'
+STUB_EVENTS="$fixtures/events/edge-answer-addendum.jsonl" stub_run --label "stub addendum" > "$work/addendum.summary.json" 2> /dev/null
+check "answer.md holds every turn-ending message in order (a verdict, then its addendum), not tool-use narration" \
+  '[ "$(cat "$(jq -r .run_dir "$work/addendum.summary.json")/answer.md")" = "$(printf "Verdict: approve. Findings: none blocking.\n\nAddendum: tests were not rerun.")" ]'
+STUB_EVENTS="$fixtures/events/edge-stop-with-toolcall.jsonl" stub_run --label "stub cut off" > "$work/cutoff.summary.json" 2> /dev/null
+check "with no turn-ending message (cut off mid-tool), answer.md falls back to the last message's text" \
+  'f="$(jq -r .run_dir "$work/cutoff.summary.json")/answer.md"; [ -s "$f" ] && [ "$(cat "$f")" = "$(jq -rs "[.[] | select(.type == \"message_end\")] | last | .message.content[] | select(.type == \"text\") | .text" "$fixtures/events/edge-stop-with-toolcall.jsonl")" ]'
+STUB_EVENTS="$fixtures/events/edge-answer-addendum.jsonl" STUB_EXIT=1 \
+  STUB_STDERR="Error: --max-time reached before the run ended; any running jobs were cancelled." \
+  stub_run --label "stub late failure" > "$work/late.summary.json" 2> /dev/null
+check "a nonzero exit after assistant messages takes final_error from stderr's Error: line" \
+  'jq -e ".final_error == \"Error: --max-time reached before the run ended; any running jobs were cancelled.\"" "$work/late.summary.json" > /dev/null'
+check "exit.txt is written after the summary and answer, so a waiter on it reads finished records" \
+  'awk "/^[^#]*\"\\\$run_dir\\/exit.txt\"/ { e = NR } /> \"\\\$run_dir\\/(answer.md|summary.json|ledger-line.json)\"/ { w = NR } END { exit !(e > w && w > 0) }" "$skill/scripts/run-omp.sh"'
 check "usage errors exit 2" 'bash "$skill/scripts/run-omp.sh" --workspace > /dev/null 2>&1; [ $? = 2 ]'
 check "an empty prompt file is a usage error" \
   ': > "$work/empty.md"; stub_run --prompt-file "$work/empty.md" > /dev/null 2>&1; [ $? = 2 ]'
@@ -294,12 +341,12 @@ if ! command -v omp > /dev/null; then
   skip "omp is not installed"
 else
   help=$(omp --help 2>&1)
-  for flag in --print --mode --cwd --model --thinking --session-dir --resume --no-session --config --approval-mode --max-time; do
+  for flag in --print --mode --cwd --model --thinking --session-dir --resume --no-session --config --approval-mode --max-time --wait-async; do
     check "omp --help lists $flag" 'printf "%s" "$help" | grep -q -- "$flag"'
   done
   check "omp models --json is an object with a models[] list of selector and id (the wrapper resolves bare IDs by id)" \
     'omp models --json 2> /dev/null | jq -e ".models | type == \"array\" and length > 0 and (.[0].selector | type == \"string\") and (.[0].id | type == \"string\")" > /dev/null'
-  for key in async.enabled bash.autoBackground.enabled memory.backend tools.approvalMode; do
+  for key in async.enabled async.printWake bash.autoBackground.enabled memory.backend tools.approvalMode; do
     check "setting $key exists (the wrapper's overlay and the skill rely on it)" 'omp config get "$key" > /dev/null 2>&1'
   done
   for key in modelProviderOrder modelRoles; do

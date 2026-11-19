@@ -12,10 +12,11 @@
 #   --label TEXT       short purpose, recorded in the ledger and the run directory name
 #   --read-only        opt-in: add --approval-mode always-ask, which refuses bash, eval, edits, MCP tools
 #                      and subagents, so the child cannot run tests or reproduce issues
-#   --allow-async      keep omp's background-job settings; by default a config overlay sets async.enabled
-#                      and bash.autoBackground.enabled to false for the run, so subagents and long bash
-#                      commands block until they finish instead of running as background jobs that
-#                      print mode cancels when it exits
+#   --allow-async      keep omp's background-job settings and pass --wait-async, so print mode waits for
+#                      the jobs and wakes the run with each result (up to --max-time). By default a config
+#                      overlay sets async.enabled and bash.autoBackground.enabled to false for the run, so
+#                      subagents and long bash commands block until they finish instead of running as
+#                      background jobs
 #   --memory           keep omp's memory setting; by default the overlay sets memory.backend to off, so the
 #                      run neither reads nor adds to a memory bank and its answer is independent of earlier runs
 #   --config FILE      add an omp config overlay for this run (repeatable); later overlays win, so these
@@ -144,6 +145,9 @@ args=(-p --cwd "$workspace" --mode json --max-time "$max_time")
 [ -n "$model" ] && args+=(--model "$model")
 [ -n "$thinking" ] && args+=(--thinking "$thinking")
 [ "$read_only" = yes ] && args+=(--approval-mode always-ask)
+# With background jobs on, --wait-async keeps print mode alive until they finish and wakes the run with each
+# result (bounded by --max-time), instead of cancelling them at exit.
+[ "$allow_async" = yes ] && args+=(--wait-async)
 # The wrapper's overlay goes first, so the caller's --config overlays (merged in order) override it.
 overlay=
 [ "$allow_async" = no ] && overlay='async:\n  enabled: false\nbash:\n  autoBackground:\n    enabled: false\n'
@@ -174,7 +178,6 @@ while kill -0 "$omp_pid" 2> /dev/null; do wait "$omp_pid"; rc=$?; done
 trap - TERM INT HUP
 umask 077
 end_s=$(date +%s)
-echo "$rc" > "$run_dir/exit.txt"
 
 # Progress-only events repeat partial tool output and message deltas; they were most of a run's bytes and
 # nothing reads them after exit. Every event line starts with its type. grep exits 1 when nothing is left.
@@ -185,17 +188,28 @@ if [ $? -le 1 ]; then mv "$run_dir/events.tmp" "$run_dir/events.jsonl"; else rm 
 jq -s -f "$skill_dir/scripts/summarize-events.jq" "$run_dir/events.jsonl" > "$run_dir/summary.json" 2> "$run_dir/summary-error.txt" \
   || jq -n --rawfile e "$run_dir/summary-error.txt" '{parse_error: $e, looks_complete: false}' > "$run_dir/summary.json"
 [ -s "$run_dir/summary-error.txt" ] || rm -f "$run_dir/summary-error.txt"
-# A launch failure (a missing @file, a --resume omp refuses) exits before any event; its reason is in stderr.
-if [ "$rc" != 0 ] && [ "$(jq -r '(.assistant_messages // 0) == 0 and .final_error == null' "$run_dir/summary.json")" = true ]; then
+# A nonzero exit whose final message carries no error: a launch failure (a missing @file, a --resume omp
+# refuses) before any event, --wait-async reaching --max-time, or the cost cap (exit 3). The reason is an
+# `Error: …` line on stderr, else a cost-gate or error notice in the events, else (with no assistant
+# message) stderr's last line.
+if [ "$rc" != 0 ] && [ "$(jq -r '.final_error == null' "$run_dir/summary.json")" = true ]; then
   # omp prints `Error: …` and may follow it with a hint; keep the error. Colors are stripped if present.
   clean_stderr=$(LC_ALL=C sed $'s/\033\\[[0-9;]*m//g' "$run_dir/stderr.txt" | grep -v '^[[:space:]]*$')
-  launch_error=$(printf '%s\n' "$clean_stderr" | grep '^Error:' | tail -1)
-  [ -n "$launch_error" ] || launch_error=$(printf '%s\n' "$clean_stderr" | tail -1)
-  [ -n "$launch_error" ] && jq --arg e "$launch_error" '.final_error = $e' "$run_dir/summary.json" > "$run_dir/summary.tmp" \
+  run_error=$(printf '%s\n' "$clean_stderr" | grep '^Error:' | tail -1)
+  [ -n "$run_error" ] || run_error=$(jq -rs '[.[] | objects | select(.type == "notice" and (.source == "cost-gate" or .level == "error"))
+    | .message | strings] | last // empty' "$run_dir/events.jsonl" 2> /dev/null)
+  if [ -z "$run_error" ] && [ "$(jq -r '(.assistant_messages // 0) == 0' "$run_dir/summary.json")" = true ]; then
+    run_error=$(printf '%s\n' "$clean_stderr" | tail -1)
+  fi
+  [ -n "$run_error" ] && jq --arg e "$run_error" '.final_error = $e' "$run_dir/summary.json" > "$run_dir/summary.tmp" \
     && mv "$run_dir/summary.tmp" "$run_dir/summary.json"
 fi
-jq -rs '[.[] | objects | select(.type == "message_end" and .message.role? == "assistant") | .message] | last
-  | [.content[]? | select(.type == "text") | .text] | join("\n")' "$run_dir/events.jsonl" > "$run_dir/answer.md" 2> /dev/null || : > "$run_dir/answer.md"
+# answer.md: every answer message (a normal `stop` with no pending tool call), in order, separated by a
+# blank line, because a run can end with a short addendum after the message that holds the answer. With
+# none (a run cut off mid-tool), the last message's text. summarize-events.jq defines the rule once and
+# counts the same messages as answer_messages.
+jq -rs --arg output answer -f "$skill_dir/scripts/summarize-events.jq" "$run_dir/events.jsonl" \
+  > "$run_dir/answer.md" 2> /dev/null || : > "$run_dir/answer.md"
 
 session_file=
 if [ "$record" = yes ]; then
@@ -230,6 +244,8 @@ if [ "$record" = yes ]; then
     && cat "$run_dir/ledger-line.json" >> "$state_dir/runs.jsonl"
 fi
 
+# exit.txt comes last, so a caller that waits for it finds the summary, answer, and ledger line written.
+echo "$rc" > "$run_dir/exit.tmp" && mv "$run_dir/exit.tmp" "$run_dir/exit.txt"
 jq --arg run_dir "$run_dir" --arg session_file "$session_file" \
   '. + {run_dir: $run_dir, session_file: ($session_file | select(. != "") // null)}' "$run_dir/summary.json"
 exit "$rc"

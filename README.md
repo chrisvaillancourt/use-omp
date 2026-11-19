@@ -91,7 +91,7 @@ Read [SKILL.md](skills/use-omp/SKILL.md) for the procedure. Additional reference
 - [Automation](skills/use-omp/references/automation.md): event fields, exit status, after-the-fact inspection, exact session resume, cancellation, and interface choice.
 - [Troubleshooting](skills/use-omp/references/troubleshooting.md): stalls, refused tools, launch errors, capability differences, authentication, and the historical Codex/Claude-tool schema failure.
 - [run-omp.sh](skills/use-omp/scripts/run-omp.sh): the launch wrapper agents use. It runs one headless task with JSON events and closed stdin, starts omp in the workspace, and applies a per-run overlay:
-  - It turns omp's background jobs off (`async.enabled` and `bash.autoBackground.enabled`), so subagents and long commands finish before exit. `--allow-async` opts out.
+  - It turns omp's background jobs off (`async.enabled` and `bash.autoBackground.enabled`), so subagents and long commands finish before exit. `--allow-async` opts out and passes `--wait-async`, so print mode waits for the background jobs instead.
   - It turns omp's memory off, so a second opinion is independent of earlier runs. `--memory` opts out.
 
   It picks the model from `--model`, `USE_OMP_MODEL`, or omp's `default` role, and resolves bare model IDs by your provider order. It keeps the records: the omp transcript in a delegations folder that `omp stats` reports separately, a run directory, and a line in a `runs.jsonl` ledger.
@@ -113,7 +113,7 @@ Normal-capability omp calls can modify files and use configured services. A pare
 
 Reviews keep full capabilities so the reviewer can run tests and reproduce issues. The skill protects the user's files by isolating the review (a worktree or clone, scratch files in a temporary directory, `git status` before and after) rather than by restricting tools. `--read-only` (`--approval-mode always-ask`) is opt-in. It blocks bash, eval, edits, MCP tools, and subagents, so a review becomes unverified static analysis. See decision 5 in [docs/decisions.md](docs/decisions.md). Decision 6 explains why the wrapper turns omp's background jobs off for headless runs.
 
-CLI guidance was checked against installed omp **18.12.3** (source and live runs). The historical schema diagnosis is explicitly scoped to **18.4.9**. Upstream help and the installed version take precedence over cached examples. A successful model response does not verify every optional tool or establish parity with the interactive UI.
+CLI guidance was checked against installed omp **18.22.2** (source and live runs). The historical schema diagnosis is explicitly scoped to **18.4.9**. Upstream help and the installed version take precedence over cached examples. A successful model response does not verify every optional tool or establish parity with the interactive UI.
 
 ## Verification
 
@@ -125,15 +125,15 @@ scripts/verify-skill.sh openai-codex/gpt-6-luna:low  # after every omp upgrade: 
 scripts/verify-skill.sh --probe subagent openai-codex/gpt-6-luna:low  # rerun one probe
 ```
 
-**Free tier** (`scripts/test-offline.sh`, 108 checks). Run it after any skill edit. It covers:
+**Free tier** (`scripts/test-offline.sh`, 125 checks). Run it after any skill edit. It covers:
 
-- `summarize-events.jq` against fixtures in `tests/fixtures/events/`. Six are trimmed events from real omp 18.10.3 runs, with local paths and provider response IDs removed: a normal run, a deadline, a refused tool, an inline subagent, a background subagent, and a backgrounded bash command. The rest are edge cases: a final `stop` that still carries a tool call, `pause_turn`, a missing `agent_end`, empty text, odd records, a truncated stream, patch-format edits, a session transcript, and a failed subagent.
-- `report.sh` against a ledger fixture with malformed lines, non-ISO dates, non-numeric fields, read-only and unexpected refusals, ordinary tool errors, and background jobs.
+- `summarize-events.jq` against fixtures in `tests/fixtures/events/`. Six are trimmed events from real omp 18.10.3 runs, with local paths and provider response IDs removed: a normal run, a deadline, a refused tool, an inline subagent, a background subagent, and a backgrounded bash command. The rest are edge cases: a final `stop` that still carries a tool call, `pause_turn`, a missing `agent_end`, a stream that stops after a non-terminal `agent_end`, a second run in one stream, an answer followed by an addendum, partial attempts before a recovered answer, a narration-only answer, empty text and empty text blocks, a last loop with no message, odd records, a truncated stream, patch-format edits, a session transcript, and a failed subagent.
+- `report.sh` against a ledger fixture with malformed lines, non-ISO dates, non-numeric fields, read-only and unexpected refusals, ordinary tool errors, and background jobs, and against a small ledger where only the background jobs nobody waited for count as problems.
 - `run-omp.sh` against a stub `omp` on `PATH`:
   - umask and launch directory;
   - the flags it passes, including the typed line that names the task file, the background-job and memory overlay, `--config`, `--read-only`, `--allow-async`, `--memory`, `--resume`, and `--no-record`;
   - model selection: `USE_OMP_MODEL`, omp's default role, bare IDs resolved by `modelProviderOrder`, and exit 2 for an ambiguous or unknown ID;
-  - the ledger line, `final_error` for a launch failure, the dropped progress events, and private record files;
+  - the ledger line, `final_error` for a launch failure and for a nonzero exit after assistant messages, `answer.md` (every answer message, or the last message when there is none), `exit.txt` written last, the dropped progress events, and private record files;
   - TERM handling and usage errors.
 - `verify-skill.sh` usage errors, which must stop before any model call; its declined-task pattern against answer fixtures in `tests/fixtures/answers/`; and, through the stub `omp`, a FAIL for a probe whose answer declines the task and a SKIP for one that only mentions the file.
 - omp CLI facts checked without sending a prompt:
@@ -165,6 +165,8 @@ Later that day, after `run-omp.sh` began following the task file with a typed li
 On 2026-10-19 with omp 18.12.3, the live tier passed every behavior probe with `openai-codex/gpt-6-luna:low`; the only failure was the version check, before SKILL.md named 18.12.3. The 18.10.4 to 18.12.3 source diff leaves the skill's claims intact except one: print mode now exits 1 when length-stop recovery gives up. The [audit addendum](docs/2026-10-13-audit.md#upgrade-check-18123-2026-10-19) cites the files.
 
 On 2026-10-21 with omp 18.12.3, after the wrapper gained model selection, the memory-off default, and dropped progress events, the live tier passed every check with `openai-codex/gpt-6-luna:low`. An earlier run that day had one SKIP (the model skipped the subagent call), and a `--probe subagent` rerun passed.
+
+On 2026-11-18 with omp 18.22.2, the live tier passed every behavior probe with `openai-codex/gpt-6-luna:low`; the only failure was the version check, before SKILL.md named 18.22.2. A separate probe confirmed that `--allow-async` with `--wait-async` waits for a background subagent. The [audit addendum](docs/2026-10-13-audit.md#upgrade-check-18222-2026-11-18) cites the files.
 
 Earlier live checks on 2026-10-06 with omp 18.6.3 exercised a real file read through the default tool setup, JSON event extraction with the documented jq filters, and exact-session recall. The dedicated-session recipe also accepted a dash-prefixed task and an `@`-prefixed literal follow-up without interpreting them as CLI syntax. Both pnpm and npm runners discovered the skill through `skills add . --list`.
 

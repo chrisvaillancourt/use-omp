@@ -71,7 +71,8 @@ The ledger answers most questions directly. For runs launched without the wrappe
 
 - `looks_complete` is a heuristic. It cannot tell whether the answer is right, or whether the child declined the task; check the evidence.
 - `write_targets` misses files changed through `bash`. `git status` is the authority.
-- With `--allow-async` or a direct launch without the overlay, background subagents and long bash commands can be cancelled at exit, and background subagent spend is not in the summary.
+- With a direct launch that has neither the overlay nor `--wait-async`, background subagents and long bash commands can be cancelled at exit. With `--allow-async` the wrapper passes `--wait-async`, so they finish, up to `--max-time`. Either way, background subagent spend is not in the summary.
+- `answer.md` joins every answer message (a normal `stop` with no tool call left). A child that answers, then adds a long unrelated message, puts both in the file; `answer_messages` in the summary says how many there are.
 - The overlay depends on the setting IDs `async.enabled`, `bash.autoBackground.enabled`, and `memory.backend`, and bare-ID resolution on `modelProviderOrder`, `modelRoles`, and the `id` field of `omp models --json`. The offline tests fail if omp renames any of them, and the live tier's subagent and 65-second bash probes check that the background-job settings still take effect.
 - With the overlay, every bash command runs inline under omp's tool timeout (300 seconds by default, capped by `tools.maxTimeout`). Tasks with longer commands should tell the child to pass a larger `timeout` to bash.
 - The wrapper cannot forward INT when it was started as a background job; cancel with TERM.

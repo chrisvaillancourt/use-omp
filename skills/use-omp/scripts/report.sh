@@ -56,7 +56,7 @@ report=$(jq -R -s --arg since "$since" '
       by_workspace: ($runs | group_by(.workspace // "?") | map({key: (.[0].workspace // "?"), value: stats}) | from_entries),
       by_week: ($runs | group_by(week) | map({key: (.[0] | week), value: stats}) | from_entries),
       recent_problems: ($runs | map(select(.looks_complete != true or .exit != 0 or unexpected_refusals > 0
-          or num(.subagent_failures) > 0 or num(.background_jobs) > 0)) | sort_by(.started) | .[-10:]
+          or num(.subagent_failures) > 0 or (num(.background_jobs) > 0 and .async != true))) | sort_by(.started) | .[-10:]
         | map({started, label, model, exit, looks_complete, final_stop_reason, final_error, tool_errors, approval_refusals, read_only,
             subagent_failures, background_jobs, run_dir}))
     }' "$ledger") || exit 1
