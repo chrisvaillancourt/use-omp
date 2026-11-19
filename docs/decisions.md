@@ -126,6 +126,8 @@ Every live probe runs with memory off, which is now the wrapper's default (decis
 
 **Revisit if:** delegations shift from consultations to implementation work where callers routinely pass `--memory`, or omp gains a way to read a bank without writing to it.
 
+**Reviewed (2026-11-18):** with the skill's goal set as matching interactive omp (decision 6), memory off is the one remaining deliberate difference. It stays off by default, because recalled memory biasing a second opinion is a correctness problem, not bookkeeping. Callers that delegate implementation pass `--memory`.
+
 ## 11. Keep the skill generic
 
 **Decision:** The skill has no user-specific paths, credentials, preferred models, or organization settings. Record locations default to omp's and XDG's standard places and can be overridden by environment variables. User-specific facts from the audit (for example the user's role mappings) stay out of the skill.
@@ -182,3 +184,11 @@ Every live probe runs with memory off, which is now the wrapper's default (decis
 **Why:** `answer.md` held only the last assistant message. In a few recorded runs, a reviewer ended with a short addendum after the message that held its verdict, so `answer.md` was one line ("Verdict unchanged") while `looks_complete` was true, and the verdict was only in `events.jsonl`. One caller noticed and wrote its own extractor; another nearly took the addendum for the verdict. On those runs the new rule writes the verdict followed by the addendum. "Every turn-ending message" was chosen over "the longest message", which is a guess: a long interim summary could beat a short, correct verdict.
 
 **Revisit if:** callers find answers padded with messages they do not want, or omp marks the final answer explicitly in the event stream.
+
+## 18. The default deadline is 60 minutes
+
+**Decision (user, 2026-11-18):** `run-omp.sh` defaults `--max-time` to `60m` (was `30m`). Callers still set their own when a task warrants it.
+
+**Why:** interactive omp has no deadline, and the skill's goal is to behave like it (decision 6). Now that runs wait for background jobs, a deadline that lands while jobs run cancels them and exits 1, and 30 minutes was already short for `xhigh` reviews. A deadline still guards against a run that never ends, and a run it cuts off can be resumed with a larger one.
+
+**Revisit if:** runs routinely hit the default, or stalled runs hold resources for the full hour.

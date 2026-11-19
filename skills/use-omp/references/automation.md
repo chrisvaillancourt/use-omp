@@ -18,7 +18,7 @@ Verify interface flags with the installed `omp --help`. Protocol fields can chan
 
 Each `runs.jsonl` line has `started`, `duration_s`, `label`, `workspace`, `model` (the model of the final assistant message, else the selector passed), `model_requested` (`--model` or `USE_OMP_MODEL` as given, before bare-ID resolution), `model_source` (`flag`, `env`, or `omp-default`), `thinking`, `read_only`, `memory_off` (true when the wrapper's overlay turned memory off, that is without `--memory`; a later `--config` overlay can still turn it back on), `resumed_session`, `max_time`, `omp_version`, `exit`, `looks_complete`, `final_stop_reason`, `final_error` (for a launch failure with no events, stderr's last line), `session_id`, `models`, `assistant_messages`, `tool_calls`, `tool_errors`, `approval_refusals` (tool errors from approval checks, expected under `--read-only`), `write_targets`, `subagent_tasks`, `background_jobs` (task and bash), `subagent_failures`, `subagent_cost_usd`, `retries`, `tokens`, `primary_cost_usd` (costs are omp's list-price estimates, not charges), `async` (true unless `--no-async`: background jobs on and `--wait-async` passed), `extra_configs` (overlays passed with `--config`), `caller` (`claude_session_id` from `CLAUDE_CODE_SESSION_ID` when set, and `cwd`), `run_dir`, and `session_file`. `--no-record` runs write neither record.
 
-The wrapper's overlay turns omp's memory off for each run, so a run neither reads nor adds to a memory bank. `--memory` keeps the user's setting. Overlays passed with `--config` merge after the wrapper's, in order, and the later value wins.
+The wrapper's overlay turns omp's memory off for each run, so a run neither reads nor adds to a memory bank. `--memory` keeps the user's setting. With memory on, isolation depends on the backend's scoping, not just the workspace path. For the `mnemopi` backend, `mnemopi.scoping` decides: the default `per-project` keeps one bank per workspace path, `per-project-tagged` writes per project but also recalls from a shared bank, `global` shares one bank, and a project's `.omp/config.yml` can pin one named bank for every checkout. Earlier delegated runs sharing a bank, including test runs, can surface in a new run's context. Overlays passed with `--config` merge after the wrapper's, in order, and the later value wins.
 
 Read the metrics with:
 
@@ -44,7 +44,7 @@ run_dir=$(mktemp -d "${TMPDIR:-/tmp}/omp-run.XXXXXX")
 # instead, add async.enabled: false and bash.autoBackground.enabled: false to the overlay and drop the flag.
 printf 'memory:\n  backend: off\n' > "$run_dir/omp-overlay.yml"
 omp -p --cwd "$workspace" --model "$model" --session-dir "$session_dir" --wait-async \
-  --config "$run_dir/omp-overlay.yml" --mode json --max-time 30m -- "$prompt" \
+  --config "$run_dir/omp-overlay.yml" --mode json --max-time 60m -- "$prompt" \
   < /dev/null > "$run_dir/events.jsonl" 2> "$run_dir/stderr.txt"
 echo "exit=$?" > "$run_dir/exit.txt"
 ```
@@ -118,7 +118,7 @@ Keep session persistence enabled on the first call. On follow-up:
 
 ```sh
 omp -p --cwd "$workspace" --model "$model" --session-dir "$session_dir" \
-  --resume "$session_id" --mode json --max-time 30m -- "$follow_up" \
+  --resume "$session_id" --mode json --max-time 60m -- "$follow_up" \
   < /dev/null > "$run_dir/events-2.jsonl" 2> "$run_dir/stderr-2.txt"
 ```
 

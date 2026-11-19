@@ -165,6 +165,9 @@ check "wrapper passes --cwd, --session-dir, --mode json, and an absolute @prompt
 check "wrapper follows the @prompt with the typed task line, after --" \
   'grep -A2 "^arg=@/.*/prompt.md$" "$work/stub.log" | sed -n 2p | grep -qx "arg=--" \
    && grep -A2 "^arg=@/.*/prompt.md$" "$work/stub.log" | sed -n 3p | grep -qxF "arg=The attached file is my task for you. Carry it out."'
+check "the default deadline is 60m, recorded in the ledger" \
+  'grep -A1 -x "arg=--max-time" "$work/stub.log" | tail -1 | grep -qx "arg=60m" \
+   && jq -e "select(.label == \"stub normal\") | .max_time == \"60m\"" "$stub_state/runs.jsonl" > /dev/null'
 check "wrapper adds no approval flag without --read-only" '! grep -q "approval-mode" "$work/stub.log"'
 async_overlay=$(printf "async:\n  enabled: false\nbash:\n  autoBackground:\n    enabled: false")
 memory_overlay=$(printf "memory:\n  backend: off")

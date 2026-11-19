@@ -8,7 +8,7 @@
 #                      any --config overlays; with no order set, or an ID omp does not list, the wrapper exits 2
 #                      and names the candidates.
 #   --thinking LEVEL   off|minimal|low|medium|high|xhigh|max|auto (default: omp's own resolution)
-#   --max-time DUR     omp deadline, e.g. 600, 10m, 1h (default 30m)
+#   --max-time DUR     omp deadline, e.g. 600, 10m, 1h (default 60m)
 #   --label TEXT       short purpose, recorded in the ledger and the run directory name
 #   --read-only        opt-in: add --approval-mode always-ask, which refuses bash, eval, edits, MCP tools
 #                      and subagents, so the child cannot run tests or reproduce issues
@@ -46,7 +46,7 @@ usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' 
 die() { echo "run-omp.sh: $*" >&2; exit 2; }
 need() { [ $# -ge 2 ] && [ -n "$2" ] || die "$1 needs a value"; }
 
-workspace= model= prompt_file= thinking= max_time=30m label= read_only=no resume= record=yes async_jobs=yes memory=no
+workspace= model= prompt_file= thinking= max_time=60m label= read_only=no resume= record=yes async_jobs=yes memory=no
 extra_configs=()
 while [ $# -gt 0 ]; do
   case $1 in

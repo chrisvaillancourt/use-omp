@@ -125,7 +125,7 @@ scripts/verify-skill.sh openai-codex/gpt-6-luna:low  # after every omp upgrade: 
 scripts/verify-skill.sh --probe subagent openai-codex/gpt-6-luna:low  # rerun one probe
 ```
 
-**Free tier** (`scripts/test-offline.sh`, 125 checks). Run it after any skill edit. It covers:
+**Free tier** (`scripts/test-offline.sh`, 126 checks). Run it after any skill edit. It covers:
 
 - `summarize-events.jq` against fixtures in `tests/fixtures/events/`. Six are trimmed events from real omp 18.10.3 runs, with local paths and provider response IDs removed: a normal run, a deadline, a refused tool, an inline subagent, a background subagent, and a backgrounded bash command. The rest are edge cases: a final `stop` that still carries a tool call, `pause_turn`, a missing `agent_end`, a stream that stops after a non-terminal `agent_end`, a second run in one stream, an answer followed by an addendum, partial attempts before a recovered answer, a narration-only answer, empty text and empty text blocks, a last loop with no message, odd records, a truncated stream, patch-format edits, a session transcript, and a failed subagent.
 - `report.sh` against a ledger fixture with malformed lines, non-ISO dates, non-numeric fields, read-only and unexpected refusals, ordinary tool errors, and background jobs, and against a small ledger where only the background jobs nobody waited for count as problems.
