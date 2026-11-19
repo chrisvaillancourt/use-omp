@@ -126,7 +126,7 @@ Every live probe runs with memory off, which is now the wrapper's default (decis
 
 **Revisit if:** delegations shift from consultations to implementation work where callers routinely pass `--memory`, or omp gains a way to read a bank without writing to it.
 
-**Reviewed (2026-11-18):** with the skill's goal set as matching interactive omp (decision 6), memory off is the one remaining deliberate difference. It stays off by default, because recalled memory biasing a second opinion is a correctness problem, not bookkeeping. Callers that delegate implementation pass `--memory`.
+**Reviewed (2026-11-18):** with the skill's goal set as matching interactive omp (decision 6), memory off is the one remaining deliberate difference. It stays off by default, because recalled memory biasing a second opinion is a correctness problem, not bookkeeping. SKILL.md section 2 now tells agents when to pass `--memory` (user request, 2026-11-18): on for work done in the repository (implementation, fixes, fix rounds, refactoring, tests, debugging), off for anything that judges work (reviews, second opinions, verification, audits, consultations), for test runs and untrusted code, and when unsure. The agent says in its launch notice when it turns memory on.
 
 ## 11. Keep the skill generic
 
