@@ -105,7 +105,7 @@ mkdir -p "$work/async-ledger"
 jq -cn '{started: "2026-11-18T00:00:00Z", label: "waited", model: "p/m", exit: 0, looks_complete: true, async: true, background_jobs: 2},
   {started: "2026-11-18T00:01:00Z", label: "not waited", model: "p/m", exit: 0, looks_complete: true, async: false, background_jobs: 1}' \
   > "$work/async-ledger/runs.jsonl"
-check "background jobs in a run that waited for them (--allow-async) are not a problem; elsewhere they are" \
+check "background jobs in a run that waited for them (the default, ledger async true) are not a problem; elsewhere they are" \
   '[ "$(USE_OMP_STATE_DIR="$work/async-ledger" bash "$skill/scripts/report.sh" --json | jq -c "[.recent_problems[].label]")" = "[\"not waited\"]" ]'
 
 echo "== run-omp.sh with a stub omp"
@@ -170,27 +170,29 @@ async_overlay=$(printf "async:\n  enabled: false\nbash:\n  autoBackground:\n    
 memory_overlay=$(printf "memory:\n  backend: off")
 both_overlays="$async_overlay
 $memory_overlay"
-check "the overlay turns off async subagents, bash auto-backgrounding, and memory" \
-  '[ "$(cat "$(overlay_file)")" = "$both_overlays" ]'
+check "by default the overlay turns off only memory, and the wrapper keeps background jobs and waits for them (--wait-async)" \
+  '[ "$(cat "$(overlay_file)")" = "$memory_overlay" ] && grep -qx "arg=--wait-async" "$work/stub.log"'
 check "the ledger records that the wrapper turned memory off" \
   'jq -e "select(.label == \"stub normal\") | .memory_off == true" "$stub_state/runs.jsonl" > /dev/null'
 check "the summary names the run directory and session file" \
   'jq -e ".run_dir != null and .session_file == null and .looks_complete" "$work/stub.summary.json" > /dev/null'
 check "the ledger line carries the caller and the summary" \
-  'jq -e "select(.label == \"stub normal\") | .exit == 0 and .looks_complete and .caller.cwd == \"$work\" and .async == false" "$stub_state/runs.jsonl" > /dev/null'
+  'jq -e "select(.label == \"stub normal\") | .exit == 0 and .looks_complete and .caller.cwd == \"$work\" and .async == true" "$stub_state/runs.jsonl" > /dev/null'
 check "record files are private" '[ "$(ls -l "$stub_state/runs.jsonl" | cut -c1-10)" = "-rw-------" ]'
 stub_run --label "stub read-only" --read-only > /dev/null 2>&1
 check "--read-only adds --approval-mode always-ask" 'grep -qx "arg=always-ask" "$work/stub.log"'
+stub_run --label "stub no-async" --no-async > /dev/null 2>&1
+check "--no-async turns off async subagents, bash auto-backgrounding, and memory, without --wait-async, and the ledger says so" \
+  '[ "$(cat "$(overlay_file)")" = "$both_overlays" ] && ! grep -qx "arg=--wait-async" "$work/stub.log" \
+   && jq -e "select(.label == \"stub no-async\") | .async == false" "$stub_state/runs.jsonl" > /dev/null'
 stub_run --label "stub allow-async" --allow-async > /dev/null 2>&1
-check "--allow-async leaves omp's background-job settings alone, waits for the jobs (--wait-async), and still turns memory off" \
+check "--allow-async is accepted and means the default" \
   '[ "$(cat "$(overlay_file)")" = "$memory_overlay" ] && grep -qx "arg=--wait-async" "$work/stub.log"'
-check "without --allow-async the wrapper does not pass --wait-async" \
-  'stub_run --label "stub no async" > /dev/null 2>&1; ! grep -qx "arg=--wait-async" "$work/stub.log"'
-stub_run --label "stub memory" --memory > /dev/null 2>&1
+stub_run --label "stub no-async memory" --no-async --memory > /dev/null 2>&1
 check "--memory leaves omp's memory setting alone" \
-  '[ "$(cat "$(overlay_file)")" = "$async_overlay" ] && jq -e "select(.label == \"stub memory\") | .memory_off == false" "$stub_state/runs.jsonl" > /dev/null'
-: > "$work/stub.log"; stub_run --label "stub allow-async memory" --allow-async --memory > /dev/null 2>&1
-check "--allow-async with --memory passes no overlay" 'grep -qx "pwd=$repo" "$work/stub.log" && ! grep -qx "arg=--config" "$work/stub.log"'
+  '[ "$(cat "$(overlay_file)")" = "$async_overlay" ] && jq -e "select(.label == \"stub no-async memory\") | .memory_off == false" "$stub_state/runs.jsonl" > /dev/null'
+: > "$work/stub.log"; stub_run --label "stub memory" --memory > /dev/null 2>&1
+check "--memory alone passes no overlay" 'grep -qx "pwd=$repo" "$work/stub.log" && ! grep -qx "arg=--config" "$work/stub.log"'
 stub_run --label "stub resume" --resume stub-session > /dev/null 2>&1
 check "--resume passes the session ID with the session dir" 'grep -A1 -x "arg=--resume" "$work/stub.log" | tail -1 | grep -qx "arg=stub-session"'
 printf 'memory:\n  backend: mnemopi\n' > "$work/extra.yml"

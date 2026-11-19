@@ -160,29 +160,29 @@ if want approval; then
   fi
 fi
 
-# 5. Subagents return inline: the wrapper turns async off for the run, so a subagent finishes before exit
-#    even when the parent does not wait (with async on, print mode cancels it; see docs/decisions.md).
+# 5. Subagents run as background jobs and the run waits for them: the wrapper keeps async on and passes
+#    --wait-async, so the subagent finishes and its result wakes the parent before exit (without the wait,
+#    print mode cancels it; see docs/decisions.md).
 if want subagent; then
-  run subagent "Call your task tool exactly once to start one subagent with this assignment: run the shell command \`sleep 10; echo SUBAGENT-FINISHED\` with bash, then reply with the single word SUBAGENT-DONE. Do not call any wait tool. As soon as the task tool returns, reply PARENT-DONE." --max-time 4m
+  run subagent "Call your task tool exactly once to start one subagent with this assignment: run the shell command \`sleep 10; echo SUBAGENT-FINISHED\` with bash, then reply with the single word SUBAGENT-DONE. Do not call any wait tool. Once you have the subagent's result, reply with the word it returned." --max-time 4m
   if [ "$(field subagent .subagent_tasks)" = 0 ]; then
     inconclusive subagent "subagent probe"
   else
-    check "subagent ran inline, not as a background job" '[ "$(field subagent .background_jobs)" = 0 ]'
-    check "subagent finished and returned its result" \
-      '[ "$(field subagent .subagent_failures)" = 0 ] && jq -r "select(.type == \"tool_execution_end\" and .toolName == \"task\") | .result | tostring" "$(field subagent .run_dir)/events.jsonl" | grep -q SUBAGENT-DONE'
-    check "summary reports the subagent's cost" '[ "$(field subagent "(.subagent_cost_usd > 0)")" = true ]'
+    check "subagent ran as a background job" '[ "$(field subagent .background_jobs)" -ge 1 ]'
+    check "the run waited: the subagent's result reached the answer and the run completed" \
+      '[ "$(field subagent .looks_complete)" = true ] && grep -q SUBAGENT-DONE "$(field subagent .run_dir)/answer.md"'
   fi
 fi
 
-# 6. Long bash commands block: the overlay's bash.autoBackground.enabled false keeps a command past the
-#    60-second auto-background threshold inline (otherwise it becomes a job that print mode cancels).
+# 6. Long bash commands go to the background after 60 seconds (bash.autoBackground), and the run waits for
+#    them (--wait-async), so the output still reaches the answer.
 if want bash; then
   run bash "Run exactly this shell command with your bash tool: sleep 65; echo BASH-FINISHED. Then reply with its output only." --max-time 4m
   if [ "$(field bash '.tool_calls.bash // 0')" = 0 ]; then
     inconclusive bash "long bash probe"
   else
-    check "a 65-second bash command ran inline, not as a background job" \
-      '[ "$(field bash .background_jobs)" = 0 ] && grep -q BASH-FINISHED "$(field bash .run_dir)/answer.md" \
+    check "a 65-second bash command finished and its output reached the answer" \
+      'grep -q BASH-FINISHED "$(field bash .run_dir)/answer.md" \
        && jq -e "select(.type == \"tool_execution_start\" and .toolName == \"bash\") | .args.command | test(\"sleep 65\")" "$(field bash .run_dir)/events.jsonl" > /dev/null \
        && [ "$(jq -s "map(select(.label == \"verify bash\")) | .[0].duration_s" "$work/state/runs.jsonl")" -ge 65 ]' \
       || echo "      (a timeout under 65 s kills the command; tools.maxTimeout is $(omp config get tools.maxTimeout 2>&1 | tr -d '\n'))"

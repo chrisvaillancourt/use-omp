@@ -12,11 +12,11 @@
 #   --label TEXT       short purpose, recorded in the ledger and the run directory name
 #   --read-only        opt-in: add --approval-mode always-ask, which refuses bash, eval, edits, MCP tools
 #                      and subagents, so the child cannot run tests or reproduce issues
-#   --allow-async      keep omp's background-job settings and pass --wait-async, so print mode waits for
-#                      the jobs and wakes the run with each result (up to --max-time). By default a config
-#                      overlay sets async.enabled and bash.autoBackground.enabled to false for the run, so
-#                      subagents and long bash commands block until they finish instead of running as
-#                      background jobs
+#   --no-async         run subagents and long bash commands inline: a config overlay sets async.enabled and
+#                      bash.autoBackground.enabled to false, so each blocks the child until it finishes. By
+#                      default the wrapper keeps omp's background jobs, as the TUI does, and passes
+#                      --wait-async, so print mode waits for them and wakes the child with each result (up to
+#                      --max-time) instead of cancelling them at exit. --allow-async is accepted for the default.
 #   --memory           keep omp's memory setting; by default the overlay sets memory.backend to off, so the
 #                      run neither reads nor adds to a memory bank and its answer is independent of earlier runs
 #   --config FILE      add an omp config overlay for this run (repeatable); later overlays win, so these
@@ -46,7 +46,7 @@ usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' 
 die() { echo "run-omp.sh: $*" >&2; exit 2; }
 need() { [ $# -ge 2 ] && [ -n "$2" ] || die "$1 needs a value"; }
 
-workspace= model= prompt_file= thinking= max_time=30m label= read_only=no resume= record=yes allow_async=no memory=no
+workspace= model= prompt_file= thinking= max_time=30m label= read_only=no resume= record=yes async_jobs=yes memory=no
 extra_configs=()
 while [ $# -gt 0 ]; do
   case $1 in
@@ -59,7 +59,8 @@ while [ $# -gt 0 ]; do
     --resume) need "$@"; resume=$2; shift 2 ;;
     --config) need "$@"; [ -f "$2" ] || die "config overlay not found: $2"; extra_configs+=("$(CDPATH= cd -- "$(dirname "$2")" && pwd)/$(basename "$2")"); shift 2 ;;
     --read-only) read_only=yes; shift ;;
-    --allow-async) allow_async=yes; shift ;;
+    --no-async) async_jobs=no; shift ;;
+    --allow-async) async_jobs=yes; shift ;;
     --memory) memory=yes; shift ;;
     --no-record) record=no; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -145,12 +146,12 @@ args=(-p --cwd "$workspace" --mode json --max-time "$max_time")
 [ -n "$model" ] && args+=(--model "$model")
 [ -n "$thinking" ] && args+=(--thinking "$thinking")
 [ "$read_only" = yes ] && args+=(--approval-mode always-ask)
-# With background jobs on, --wait-async keeps print mode alive until they finish and wakes the run with each
-# result (bounded by --max-time), instead of cancelling them at exit.
-[ "$allow_async" = yes ] && args+=(--wait-async)
+# Background jobs stay on, as in the TUI; --wait-async keeps print mode alive until they finish and wakes the
+# run with each result (bounded by --max-time), instead of cancelling them at exit. --no-async runs them inline.
+[ "$async_jobs" = yes ] && args+=(--wait-async)
 # The wrapper's overlay goes first, so the caller's --config overlays (merged in order) override it.
 overlay=
-[ "$allow_async" = no ] && overlay='async:\n  enabled: false\nbash:\n  autoBackground:\n    enabled: false\n'
+[ "$async_jobs" = no ] && overlay='async:\n  enabled: false\nbash:\n  autoBackground:\n    enabled: false\n'
 [ "$memory" = no ] && overlay="${overlay}memory:\n  backend: off\n"
 if [ -n "$overlay" ]; then
   printf '%b' "$overlay" > "$run_dir/omp-overlay.yml"
@@ -220,14 +221,14 @@ if [ "$record" = yes ]; then
     --arg started "$started" --argjson duration "$((end_s - start_s))" --argjson exit "$rc" \
     --arg label "$label" --arg workspace "$workspace" --arg model "$model" --arg thinking "$thinking" \
     --arg model_requested "$model_requested" --arg model_source "$model_source" --arg memory "$memory" \
-    --arg read_only "$read_only" --arg allow_async "$allow_async" --argjson extra_configs "$(printf '%s\n' ${extra_configs[@]+"${extra_configs[@]}"} | jq -R . | jq -s 'map(select(. != ""))')" --arg resumed "$resume" --arg max_time "$max_time" \
+    --arg read_only "$read_only" --arg async_jobs "$async_jobs" --argjson extra_configs "$(printf '%s\n' ${extra_configs[@]+"${extra_configs[@]}"} | jq -R . | jq -s 'map(select(. != ""))')" --arg resumed "$resume" --arg max_time "$max_time" \
     --arg omp_version "$(omp --version 2> /dev/null)" --arg run_dir "$run_dir" --arg session_file "$session_file" \
     --arg caller_session "${CLAUDE_CODE_SESSION_ID:-}" --arg caller_cwd "$PWD" \
     '$s[0] as $s | {
       started: $started, duration_s: $duration, label: $label, workspace: $workspace,
       model: ($s.final_model // $s.models[0]? // ($model | select(. != "")) // null),
       model_requested: ($model_requested | select(. != "") // null), model_source: $model_source,
-      thinking: ($thinking | select(. != "") // null), read_only: ($read_only == "yes"), async: ($allow_async == "yes"),
+      thinking: ($thinking | select(. != "") // null), read_only: ($read_only == "yes"), async: ($async_jobs == "yes"),
       memory_off: ($memory == "no"), extra_configs: $extra_configs,
       resumed_session: ($resumed | select(. != "") // null), max_time: $max_time, omp_version: $omp_version,
       exit: $exit, looks_complete: $s.looks_complete, final_stop_reason: $s.final_stop_reason,
